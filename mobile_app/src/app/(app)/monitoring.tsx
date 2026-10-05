@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Text } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import {
   Button, Card, ErrorBanner, Field, Loading, Screen, Segmented, ToggleRow, colors, styles,
@@ -8,11 +8,14 @@ import {
 import { api, errorMessage, type ComplianceSettings } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDateTime } from '@/lib/format';
-import { useProfile } from '@/lib/session';
+import { useProfile, useSession } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
 type Draft = Omit<ComplianceSettings, 'updated_at'>;
 
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+const hhmm = (t: string) => (t ?? '').slice(0, 5);
 const IDLE_MINUTES = [1, 2, 3, 5, 10, 15, 30, 60];
 const LIMITS = { retention_days: [7, 1825], summary_retention_days: [30, 3650] } as const;
 
@@ -33,9 +36,11 @@ function MonitoringForm({ initial, current, onSaved }: {
   onSaved: () => void;
 }) {
   const profile = useProfile();
+  const { aal, reloadService } = useSession();
+  const isOwner = profile.role === 'owner';
   const [draft, setDraft] = useState<Draft>(() => {
     const { updated_at: _, ...rest } = initial;
-    return rest;
+    return { ...rest, work_start: hhmm(rest.work_start), work_end: hhmm(rest.work_end) };
   });
   const [retention, setRetention] = useState(String(initial.retention_days));
   const [summaryRetention, setSummaryRetention] = useState(String(initial.summary_retention_days));
@@ -63,13 +68,30 @@ function MonitoringForm({ initial, current, onSaved }: {
     const summary = parseDays(summaryRetention, 'summary_retention_days', 'Daily totals retention');
     if (typeof summary === 'string') return setError(summary);
     if ((draft.notice_custom_text ?? '').length > 4000) return setError('The message to employees is limited to 4000 characters.');
+    if (draft.tracking_schedule === 'work_hours') {
+      if (draft.work_days.length === 0) return setError('Choose at least one working day.');
+      if (!TIME.test(draft.work_start) || !TIME.test(draft.work_end)) return setError('Enter working hours as HH:MM, e.g. 08:00.');
+      if (draft.work_start === draft.work_end) return setError('Working hours must start and end at different times.');
+    }
+    if (draft.require_mfa && !initial.require_mfa && aal.next !== 'aal2') {
+      return setError('Set up two-factor login for your own account first (Settings), or you would lock yourself out of employee data.');
+    }
     const next: Draft = { ...draft, retention_days: detail, summary_retention_days: summary };
 
+    const initialDraft: Draft = { ...initial, work_start: hhmm(initial.work_start), work_end: hhmm(initial.work_end) };
     const changed = (Object.keys(next) as (keyof Draft)[])
-      .filter((k) => (next[k] ?? '') !== (initial[k] ?? ''));
+      .filter((k) => JSON.stringify(next[k] ?? '') !== JSON.stringify(initialDraft[k] ?? ''));
     if (changed.length === 0) return notify('No changes to save');
 
-    const warnings = ['Employees will see the updated monitoring notice in the desktop app within about 5 minutes and must acknowledge it.'];
+    const warnings: string[] = [];
+    if (changed.some((k) => k !== 'require_mfa')) {
+      warnings.push('Employees will see the updated monitoring notice in the desktop app within about 5 minutes and must acknowledge it.');
+    }
+    if (changed.includes('require_mfa')) {
+      warnings.push(next.require_mfa
+        ? 'Managers without two-factor login will not see employee data until they set it up.'
+        : 'Managers will be able to see employee data with a password only.');
+    }
     if (detail < initial.retention_days) {
       warnings.push(`Detailed activity older than ${detail} days will be permanently deleted at the next nightly clean-up.`);
     }
@@ -85,6 +107,7 @@ function MonitoringForm({ initial, current, onSaved }: {
         ? `Monitoring notice version ${policy.version} published.`
         : 'Settings saved. The monitoring notice is unchanged.');
       onSaved();
+      reloadService();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -126,6 +149,59 @@ function MonitoringForm({ initial, current, onSaved }: {
           onChange={(v) => set('idle_threshold_seconds', Math.round(Number(v) * 60))} />
         <ToggleRow label="Employees may pause monitoring" value={draft.allow_pause} onChange={(v) => set('allow_pause', v)}
           hint="Pauses are recorded and visible to managers." />
+      </Card>
+
+      <Card title="When monitoring happens">
+        <Segmented options={[{ value: 'always', label: 'Whenever signed in' }, { value: 'work_hours', label: 'Working hours only' }]}
+          value={draft.tracking_schedule} onChange={(v) => set('tracking_schedule', v)} />
+        {draft.tracking_schedule === 'work_hours' ? (
+          <>
+            <Text style={styles.label}>Working days</Text>
+            <View style={styles.segmented}>
+              {DAYS.map((d, i) => {
+                const iso = i + 1;
+                const on = draft.work_days.includes(iso);
+                return (
+                  <Pressable key={d} accessibilityRole="checkbox" accessibilityState={{ checked: on }}
+                    onPress={() => set('work_days', on ? draft.work_days.filter((x) => x !== iso) : [...draft.work_days, iso].sort())}
+                    style={[styles.segment, on && styles.segmentActive]}>
+                    <Text style={[styles.segmentText, on && { color: '#fff' }]}>{d}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={[styles.row, { gap: 8 }]}>
+              <View style={{ flex: 1 }}>
+                <Field label="From" value={draft.work_start} onChangeText={(v) => set('work_start', v.trim())} placeholder="08:00" maxLength={5} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Field label="To" value={draft.work_end} onChangeText={(v) => set('work_end', v.trim())} placeholder="17:00" maxLength={5} />
+              </View>
+            </View>
+            <Text style={styles.hint}>
+              In {profile.timezone}. An end before the start means a night shift (e.g. 22:00 to 06:00). Outside these hours the
+              desktop app records nothing.
+            </Text>
+            <ToggleRow label="Note when the PC is used outside working hours" value={draft.flag_after_hours_use}
+              onChange={(v) => set('flag_after_hours_use', v)}
+              hint="Only that the PC was in use (at most once an hour), never what it was used for." />
+          </>
+        ) : (
+          <Text style={styles.hint}>The desktop app records whenever the employee is signed in to it.</Text>
+        )}
+      </Card>
+
+      <Card title="Integrity checks">
+        <ToggleRow label="Detect attempts to avoid monitoring" value={draft.detect_tampering}
+          onChange={(v) => set('detect_tampering', v)}
+          hint="Flags when the app is stopped while the PC stays on, runs in a virtual machine or remote session, or input comes in a machine-regular rhythm (mouse jigglers). Results appear under Alerts; employees are told in the notice." />
+      </Card>
+
+      <Card title="Account security">
+        <ToggleRow label="Require two-factor login for managers" value={draft.require_mfa} disabled={!isOwner}
+          onChange={(v) => set('require_mfa', v)}
+          hint={isOwner ? 'Owners and managers must enter a code from an authenticator app to see employee data. Recommended.'
+            : 'Only the owner can change this.'} />
       </Card>
 
       <Card title="Retention">

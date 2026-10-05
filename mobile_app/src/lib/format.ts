@@ -98,6 +98,16 @@ export function formatDateTime(iso: string | null | undefined, timeZone: string)
   }).format(new Date(iso));
 }
 
+export function formatDate(iso: string | null | undefined, timeZone = 'Africa/Johannesburg'): string {
+  if (!iso) return '–';
+  return new Intl.DateTimeFormat('en-GB', { timeZone, day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso));
+}
+
+/** Money in the smallest unit (cents) as e.g. "R 1 234.00". */
+export function formatMoney(cents: number, currency = 'ZAR'): string {
+  return new Intl.NumberFormat('en-ZA', { style: 'currency', currency }).format(cents / 100);
+}
+
 export function formatDay(day: Ymd, opts: { weekday?: boolean } = {}): string {
   return new Intl.DateTimeFormat('en-GB', {
     timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric', ...(opts.weekday ? { weekday: 'short' } : {}),

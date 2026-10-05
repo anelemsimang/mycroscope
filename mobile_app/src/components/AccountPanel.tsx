@@ -3,6 +3,8 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Text } from 'react-native';
 
+import { EmailPreferences } from '@/components/EmailPreferences';
+import { MfaSetup } from '@/components/MfaSetup';
 import { Button, Card, ErrorBanner, Field, LinkRow, Screen, styles } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
@@ -13,7 +15,7 @@ const roleLabel = { owner: 'Owner', manager: 'Manager', employee: 'Employee' } a
 
 export function AccountPanel() {
   const profile = useProfile();
-  const { signOut, isManager } = useSession();
+  const { signOut, isManager, service } = useSession();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -45,6 +47,24 @@ export function AccountPanel() {
         <Text style={styles.hint}>Employee code {profile.employeeCode} · timezone {profile.timezone}</Text>
       </Card>
       {isManager ? (
+        <Card title="Organisation">
+          <LinkRow title="Alerts" subtitle="Integrity checks and PCs not reporting during working hours"
+            onPress={() => router.push('/alerts')} />
+          <LinkRow title="Productivity categories" subtitle="Mark apps and websites as productive or unproductive"
+            onPress={() => router.push('/categories')} />
+          {profile.role === 'owner' ? (
+            <LinkRow title="Teams" subtitle="Group employees and choose which managers see them"
+              onPress={() => router.push('/teams')} />
+          ) : null}
+          <LinkRow title="Subscription & billing" subtitle="Plan, seats and payments"
+            onPress={() => router.push('/billing')} />
+          {profile.role === 'owner' ? (
+            <LinkRow title="Support access" subtitle="Let Mycroscope support see technical status for a limited time"
+              onPress={() => router.push('/support-access')} />
+          ) : null}
+        </Card>
+      ) : null}
+      {isManager ? (
         <Card title="Compliance (POPIA / RICA)">
           <LinkRow title="Monitoring & privacy" subtitle="What is recorded, retention, Information Officer, notice text"
             onPress={() => router.push('/monitoring')} />
@@ -54,8 +74,23 @@ export function AccountPanel() {
             onPress={() => router.push('/notice-history')} />
           <LinkRow title="Audit log" subtitle="Views, exports, deletions and setting changes"
             onPress={() => router.push('/audit-log')} />
+          <LinkRow title="Privacy requests" subtitle="Access, correction and objection requests from employees"
+            onPress={() => router.push('/requests')} />
+        </Card>
+      ) : (
+        <Card title="Your privacy">
+          <LinkRow title="Privacy requests" subtitle="Ask for a copy of your data, a correction, or object to processing"
+            onPress={() => router.push('/requests')} />
+        </Card>
+      )}
+      {isManager ? (
+        <Card title="Email notifications">
+          <EmailPreferences />
         </Card>
       ) : null}
+      <Card title="Two-factor login">
+        <MfaSetup required={isManager && !!service?.require_mfa} />
+      </Card>
       <Card title="Change password">
         {error ? <ErrorBanner message={error} /> : null}
         <Field label="New password" value={password} onChangeText={setPassword} secureTextEntry textContentType="newPassword" />

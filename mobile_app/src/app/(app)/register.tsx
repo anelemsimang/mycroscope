@@ -6,6 +6,9 @@ import { ActivationCard } from '@/components/ActivationCard';
 import { Button, Card, ErrorBanner, Field, Screen, Segmented, styles } from '@/components/ui';
 import { api, errorMessage, type ActivationResult, type Role } from '@/lib/api';
 import { useProfile } from '@/lib/session';
+import { useAsync } from '@/lib/useAsync';
+
+const NO_TEAM = 'none';
 
 export default function RegisterEmployee() {
   const profile = useProfile();
@@ -13,6 +16,8 @@ export default function RegisterEmployee() {
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [role, setRole] = useState<Role>('employee');
+  const [team, setTeam] = useState<string>(NO_TEAM);
+  const teams = useAsync(async () => (profile.role === 'owner' ? (await api.teams()).teams : []), [profile.role]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ActivationResult | null>(null);
@@ -25,7 +30,8 @@ export default function RegisterEmployee() {
     }
     setBusy(true);
     try {
-      setResult(await api.createEmployee(name.trim(), email.trim(), role, code.trim() || undefined));
+      setResult(await api.createEmployee(name.trim(), email.trim(), role, code.trim() || undefined,
+        team === NO_TEAM ? null : team));
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -39,6 +45,7 @@ export default function RegisterEmployee() {
     setEmail('');
     setCode('');
     setRole('employee');
+    setTeam(NO_TEAM);
   }
 
   if (result) {
@@ -66,7 +73,15 @@ export default function RegisterEmployee() {
             <Segmented value={role} onChange={setRole} options={[
               { value: 'employee', label: 'Employee' }, { value: 'manager', label: 'Manager' },
             ]} />
-            <Text style={styles.hint}>Managers can see everyone's activity and manage employees.</Text>
+            <Text style={styles.hint}>Managers can see activity and manage employees (only their teams' people if you assign them teams).</Text>
+          </>
+        ) : null}
+        {(teams.data?.length ?? 0) > 0 ? (
+          <>
+            <Text style={styles.label}>Team</Text>
+            <Segmented value={team} onChange={setTeam} options={[
+              { value: NO_TEAM, label: 'No team' }, ...(teams.data ?? []).map((t) => ({ value: t.id, label: t.name })),
+            ]} />
           </>
         ) : null}
       </Card>

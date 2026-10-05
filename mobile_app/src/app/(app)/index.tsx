@@ -2,6 +2,8 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { OnboardingChecklist } from '@/components/Onboarding';
+import { ServiceBanner } from '@/components/ServiceBanner';
 import {
   ActionButton, Button, Card, Empty, ErrorBanner, Loading, Pill, Screen, StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
@@ -17,8 +19,10 @@ const roleColor = { owner: colors.danger, manager: colors.warning, employee: col
 
 export default function Dashboard() {
   const profile = useProfile();
-  const { signOut } = useSession();
+  const { signOut, service } = useSession();
   const [live, setLive] = useState(false);
+  const alerts = useAsync(() => api.integrityAlerts(new Date(Date.now() - 86_400_000).toISOString()), []);
+  const highAlerts = (alerts.data ?? []).filter((a) => a.severity === 'high').length;
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const { data, error, loading, refreshing, refresh, reload } = useAsync(async () => {
     const rows = await api.teamOverview(todayIn(profile.timezone));
@@ -71,6 +75,18 @@ export default function Dashboard() {
 
       <View style={local.body}>
         {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
+        <ServiceBanner service={service} timezone={profile.timezone} />
+        <OnboardingChecklist team={data} />
+        {alerts.data && alerts.data.length > 0 ? (
+          <Pressable onPress={() => router.push('/alerts')} accessibilityRole="button"
+            style={({ pressed }) => [local.alerts, pressed && { opacity: 0.7 }]}>
+            <Text style={{ color: colors.danger, fontWeight: '600', flex: 1 }}>
+              {alerts.data.length} alert{alerts.data.length === 1 ? '' : 's'} in the last 24 hours
+              {highAlerts > 0 ? ` (${highAlerts} high)` : ''}
+            </Text>
+            <Text style={{ color: colors.danger, fontWeight: '600' }}>Review ›</Text>
+          </Pressable>
+        ) : null}
         <StatGrid items={[
           { label: 'Online now', value: `${online}/${team.length}` },
           { label: 'Team active today', value: formatDuration(totalActive), color: colors.success },
@@ -81,6 +97,7 @@ export default function Dashboard() {
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <ActionButton title="Reports" onPress={() => router.push('/reports')} />
             <ActionButton title="Register Employee" onPress={() => router.push('/register')} />
+            <ActionButton title="Alerts" onPress={() => router.push('/alerts')} />
             <ActionButton title="Settings" onPress={() => router.push('/settings')} />
           </View>
         </Card>
@@ -162,6 +179,10 @@ const local = StyleSheet.create({
   header: { backgroundColor: colors.card, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 2 },
   welcome: { fontSize: 18, fontWeight: 'bold', color: colors.text },
   body: { padding: 12, gap: 12, paddingBottom: 40 },
+  alerts: {
+    flexDirection: 'row', gap: 8, padding: 12, borderRadius: 8, backgroundColor: '#fee2e2',
+    borderLeftWidth: 4, borderLeftColor: colors.danger,
+  },
   dot: { width: 8, height: 8, borderRadius: 4 },
   empRow: {
     flexDirection: 'row', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6',

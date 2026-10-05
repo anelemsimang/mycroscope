@@ -4,7 +4,7 @@ import { supabase } from './supabase';
 import type { Ymd } from './format';
 
 export type Role = 'owner' | 'manager' | 'employee';
-export type ActivityState = 'active' | 'idle' | 'away' | 'paused' | 'logged_out';
+export type ActivityState = 'active' | 'idle' | 'away' | 'paused' | 'logged_out' | 'off_hours' | 'inactive';
 
 export interface TeamRow {
   employee_id: string;
@@ -26,6 +26,8 @@ export interface TeamRow {
   away_seconds: number;
   paused_seconds: number;
   needs_acknowledgement: boolean;
+  team_id: string | null;
+  team_name: string | null;
 }
 
 export interface DailyTotal {
@@ -65,6 +67,7 @@ export interface EmployeeRow {
   is_active: boolean;
   auth_user_id: string | null;
   created_at: string;
+  team_id: string | null;
 }
 
 export interface AgentStatus {
@@ -100,9 +103,111 @@ export interface ComplianceSettings {
   retention_days: number;
   summary_retention_days: number;
   notice_custom_text: string | null;
+  tracking_schedule: 'always' | 'work_hours';
+  /** ISO weekdays, Monday = 1. */
+  work_days: number[];
+  /** HH:MM or HH:MM:SS */
+  work_start: string;
+  work_end: string;
+  flag_after_hours_use: boolean;
+  detect_tampering: boolean;
+  require_mfa: boolean;
   information_officer_name: string | null;
   information_officer_email: string | null;
   updated_at: string;
+}
+
+const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track_full_urls,idle_threshold_seconds,' +
+  'allow_pause,retention_days,summary_retention_days,notice_custom_text,tracking_schedule,work_days,work_start,' +
+  'work_end,flag_after_hours_use,detect_tampering,require_mfa,updated_at';
+
+export type ServiceLevel = 'full' | 'read_only';
+export interface ServiceStatus {
+  level: ServiceLevel;
+  status: 'trialing' | 'active' | 'past_due' | 'cancelled' | 'suspended';
+  plan: string;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  grace_until: string | null;
+  seats: number;
+  seats_used: number;
+  require_mfa: boolean;
+}
+
+export interface Team { id: string; name: string }
+export interface TeamManager { team_id: string; employee_id: string }
+
+export type Category = 'productive' | 'neutral' | 'unproductive';
+export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category }
+export interface CategoryTotal { category: Category | 'uncategorised'; active_seconds: number; idle_seconds: number }
+
+export type DataRequestKind = 'access' | 'correction' | 'objection' | 'deletion' | 'other';
+export type DataRequestStatus = 'open' | 'in_progress' | 'completed' | 'rejected';
+export interface DataRequest {
+  id: string;
+  employee_id: string;
+  kind: DataRequestKind;
+  message: string;
+  status: DataRequestStatus;
+  response: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IntegrityAlert {
+  employee_id: string;
+  employee_name: string;
+  occurred_at: string;
+  kind: string;
+  severity: 'high' | 'medium' | 'low';
+  details: Record<string, unknown>;
+}
+
+export interface SupportGrant { id: string; reason: string; expires_at: string; revoked_at: string | null; created_at: string }
+
+export interface Payment {
+  reference: string; amount_cents: number; currency: string; seats: number; months: number; paid_at: string;
+}
+
+export interface OperatorOrg {
+  organization_id: string;
+  name: string;
+  created_at: string;
+  owner_name: string | null;
+  owner_email: string | null;
+  plan: string | null;
+  status: ServiceStatus['status'] | null;
+  level: ServiceLevel | null;
+  seats: number | null;
+  active_employees: number;
+  activated_employees: number;
+  agents_online: number;
+  last_activity_at: string | null;
+  trial_ends_at: string | null;
+  current_period_end: string | null;
+  support_access_until: string | null;
+}
+
+export interface SystemHealth {
+  organizations: number;
+  paying_organizations: number;
+  trialing_organizations: number;
+  active_employees: number;
+  agents_online: number;
+  segments_last_24h: number;
+  last_maintenance_at: string | null;
+  open_data_requests: number;
+}
+
+export interface OperatorAuditEntry {
+  id: number; operator_auth_id: string | null; operator_email: string | null; action: string;
+  organization_id: string | null; details: Record<string, unknown>; created_at: string;
+}
+
+export interface SupportSnapshotRow {
+  employee_id: string; name: string; role: Role; is_active: boolean; activated: boolean;
+  agent_version: string | null; agent_state: string | null; last_seen_at: string | null; hostname: string | null;
+  os_version: string | null; needs_acknowledgement: boolean; recent_problems: { type: string; at: string }[] | null;
 }
 
 export interface Policy {
@@ -197,31 +302,23 @@ export const api = {
 
   complianceSettings: async (organizationId: string): Promise<ComplianceSettings> => {
     const [settings, org] = await Promise.all([
-      supabase.from('organization_settings')
-        .select('track_apps,track_window_titles,track_web_domains,track_full_urls,idle_threshold_seconds,allow_pause,retention_days,summary_retention_days,notice_custom_text,updated_at')
-        .eq('organization_id', organizationId).single(),
+      supabase.from('organization_settings').select(SETTINGS_COLUMNS).eq('organization_id', organizationId).single(),
       supabase.from('organizations').select('information_officer_name,information_officer_email').eq('id', organizationId).single(),
     ]);
     if (settings.error) throw settings.error;
     if (org.error) throw org.error;
-    return { ...settings.data, ...org.data } as ComplianceSettings;
+    return { ...(settings.data as unknown as Record<string, unknown>), ...org.data } as ComplianceSettings;
   },
 
   /** Saves settings and Information Officer together; returns the current notice version. */
-  saveComplianceSettings: (s: Omit<ComplianceSettings, 'updated_at'>) =>
-    rpc<Policy>('save_compliance_settings', {
-      p_track_apps: s.track_apps,
-      p_track_window_titles: s.track_window_titles,
-      p_track_web_domains: s.track_web_domains,
-      p_track_full_urls: s.track_full_urls,
-      p_idle_threshold_seconds: s.idle_threshold_seconds,
-      p_allow_pause: s.allow_pause,
-      p_retention_days: s.retention_days,
-      p_summary_retention_days: s.summary_retention_days,
-      p_notice_custom_text: s.notice_custom_text,
-      p_information_officer_name: s.information_officer_name,
-      p_information_officer_email: s.information_officer_email,
-    }),
+  saveComplianceSettings: (s: Omit<ComplianceSettings, 'updated_at'>) => {
+    const { information_officer_name, information_officer_email, ...settings } = s;
+    return rpc<Policy>('save_compliance_settings', {
+      p_settings: settings,
+      p_information_officer_name: information_officer_name,
+      p_information_officer_email: information_officer_email,
+    });
+  },
 
   policies: async () => {
     const { data, error } = await supabase
@@ -254,7 +351,7 @@ export const api = {
   employees: async () => {
     const { data, error } = await supabase
       .from('employees')
-      .select('id,name,email,employee_code,role,is_active,auth_user_id,created_at')
+      .select('id,name,email,employee_code,role,is_active,auth_user_id,created_at,team_id')
       .order('name');
     if (error) throw error;
     return (data ?? []) as EmployeeRow[];
@@ -263,16 +360,16 @@ export const api = {
   employee: async (id: string) => {
     const { data, error } = await supabase
       .from('employees')
-      .select('id,name,email,employee_code,role,is_active,auth_user_id,created_at')
+      .select('id,name,email,employee_code,role,is_active,auth_user_id,created_at,team_id')
       .eq('id', id)
       .maybeSingle();
     if (error) throw error;
     return data as EmployeeRow | null;
   },
 
-  createEmployee: async (name: string, email: string, role: Role, code?: string) =>
+  createEmployee: async (name: string, email: string, role: Role, code?: string, teamId?: string | null) =>
     (await rpc<ActivationResult[]>('create_employee', {
-      p_name: name, p_email: email, p_role: role, p_employee_code: code || null,
+      p_name: name, p_email: email, p_role: role, p_employee_code: code || null, p_team_id: teamId || null,
     }))[0],
 
   issueActivationCode: async (employee: string) =>
@@ -327,4 +424,110 @@ export const api = {
 
   logAccess: (employee: string, action: 'viewed_employee' | 'exported_report' | 'exported_data', details: object = {}) =>
     rpc<void>('log_data_access', { p_employee: employee, p_action: action, p_details: details }).catch(() => undefined),
+
+  // ---- subscription and billing ----------------------------------------
+  serviceStatus: async () => {
+    const rows = await rpc<ServiceStatus[]>('get_my_service_status');
+    return rows[0] ?? null;
+  },
+
+  payments: async () => {
+    const { data, error } = await supabase.from('payments')
+      .select('reference,amount_cents,currency,seats,months,paid_at').order('paid_at', { ascending: false }).limit(50);
+    if (error) throw error;
+    return (data ?? []) as Payment[];
+  },
+
+  /** Starts a Paystack payment; returns the page to send the owner to. */
+  startCheckout: async (seats: number, months: number, returnUrl: string) => {
+    const { data, error } = await supabase.functions.invoke('paystack-checkout', {
+      body: { seats, months, return_url: returnUrl },
+    });
+    if (error) {
+      const ctx = (error as { context?: Response }).context;
+      let message = 'Online payment is not available yet. Contact Mycroscope support to pay by EFT.';
+      try {
+        const body = ctx ? await ctx.json() : null;
+        if (body?.error) message = body.error;
+      } catch { /* keep the generic message */ }
+      throw new Error(message);
+    }
+    return data as { authorization_url: string; reference: string; amount_cents: number; currency: string };
+  },
+
+  supportGrants: async () => {
+    const { data, error } = await supabase.from('support_access_grants')
+      .select('id,reason,expires_at,revoked_at,created_at').order('created_at', { ascending: false }).limit(20);
+    if (error) throw error;
+    return (data ?? []) as SupportGrant[];
+  },
+  grantSupportAccess: (hours: number, reason: string) => rpc('grant_support_access', { p_hours: hours, p_reason: reason }),
+  revokeSupportAccess: () => rpc<void>('revoke_support_access'),
+
+  notificationPreferences: async () =>
+    (await rpc<{ weekly_digest: boolean; alert_emails: boolean }[]>('get_my_notification_preferences'))[0]
+      ?? { weekly_digest: true, alert_emails: true },
+  setNotificationPreferences: (weeklyDigest: boolean, alertEmails: boolean) =>
+    rpc<void>('set_my_notification_preferences', { p_weekly_digest: weeklyDigest, p_alert_emails: alertEmails }),
+
+  // ---- teams -------------------------------------------------------------
+  teams: async () => {
+    const [teams, managers] = await Promise.all([
+      supabase.from('teams').select('id,name').order('name'),
+      supabase.from('team_managers').select('team_id,employee_id'),
+    ]);
+    if (teams.error) throw teams.error;
+    if (managers.error) throw managers.error;
+    return { teams: (teams.data ?? []) as Team[], managers: (managers.data ?? []) as TeamManager[] };
+  },
+  saveTeam: (id: string | null, name: string) => rpc<Team>('save_team', { p_team: id, p_name: name }),
+  deleteTeam: (id: string) => rpc<void>('delete_team', { p_team: id }),
+  setEmployeeTeam: (employee: string, team: string | null) => rpc<void>('set_employee_team', { p_employee: employee, p_team: team }),
+  setTeamManagers: (team: string, managers: string[]) => rpc<void>('set_team_managers', { p_team: team, p_managers: managers }),
+
+  // ---- productivity categories ------------------------------------------
+  categoryRules: async () => {
+    const { data, error } = await supabase.from('app_categories').select('id,kind,pattern,category').order('pattern');
+    if (error) throw error;
+    return (data ?? []) as CategoryRule[];
+  },
+  setCategory: (kind: 'app' | 'domain', pattern: string, category: Category) =>
+    rpc<CategoryRule>('set_app_category', { p_kind: kind, p_pattern: pattern, p_category: category }),
+  deleteCategory: (id: string) => rpc<void>('delete_app_category', { p_id: id }),
+  categoryTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
+    numeric(await rpc<CategoryTotal[]>('get_category_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
+      ['active_seconds', 'idle_seconds']),
+
+  // ---- POPIA requests ------------------------------------------------------
+  dataRequests: async () => {
+    const { data, error } = await supabase.from('data_requests')
+      .select('id,employee_id,kind,message,status,response,created_at,updated_at').order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as DataRequest[];
+  },
+  submitDataRequest: (kind: DataRequestKind, message: string) =>
+    rpc<DataRequest>('submit_data_request', { p_kind: kind, p_message: message }),
+  respondDataRequest: (id: string, status: Exclude<DataRequestStatus, 'open'>, response: string) =>
+    rpc<DataRequest>('respond_data_request', { p_request: id, p_status: status, p_response: response }),
+
+  // ---- alerts ----------------------------------------------------------------
+  integrityAlerts: (sinceIso: string) => rpc<IntegrityAlert[]>('get_integrity_alerts', { p_since: sinceIso }),
+};
+
+/** Functions only platform operators (the SaaS provider, signed in with two-factor) may call. */
+export const operatorApi = {
+  isOperator: () => rpc<boolean>('am_i_platform_admin'),
+  organizations: () => rpc<OperatorOrg[]>('op_organizations'),
+  health: async () => (await rpc<SystemHealth[]>('op_system_health'))[0],
+  audit: (limit = 200) => rpc<OperatorAuditEntry[]>('op_operator_audit', { p_limit: limit }),
+  updateSubscription: (org: string, changes: {
+    plan?: string | null; status?: string | null; seats?: number | null; trial_ends_at?: string | null;
+    current_period_end?: string | null;
+  }, note: string) => rpc('op_update_subscription', {
+    p_org: org, p_plan: changes.plan ?? null, p_status: changes.status ?? null, p_seats: changes.seats ?? null,
+    p_trial_ends_at: changes.trial_ends_at ?? null, p_current_period_end: changes.current_period_end ?? null, p_note: note,
+  }),
+  supportSnapshot: (org: string) => rpc<SupportSnapshotRow[]>('op_support_snapshot', { p_org: org }),
+  deleteOrganization: (org: string, confirmName: string) =>
+    rpc<void>('op_delete_organization', { p_org: org, p_confirm_name: confirmName }),
 };

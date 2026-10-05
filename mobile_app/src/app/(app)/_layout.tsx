@@ -1,7 +1,8 @@
 import { Stack, router } from 'expo-router';
 import { Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
 
-import { Button, headerOptions } from '@/components/ui';
+import { MfaSetup } from '@/components/MfaSetup';
+import { Button, Card, Screen, headerOptions, styles } from '@/components/ui';
 import { useSession } from '@/lib/session';
 
 /** Width from which the header offers a direct "All employees" button (desktop browsers, tablets). */
@@ -26,7 +27,7 @@ function HeaderLink({ label, side }: { label: string; side: 'left' | 'right' }) 
 }
 
 export default function AppLayout() {
-  const { profile, isManager, reloadProfile, signOut } = useSession();
+  const { profile, isManager, reloadProfile, signOut, service, aal } = useSession();
   const { width } = useWindowDimensions();
   const wide = Platform.OS === 'web' || width >= WIDE;
 
@@ -37,6 +38,20 @@ export default function AppLayout() {
         <Button title="Try again" onPress={reloadProfile} />
         <Button title="Sign out" variant="ghost" onPress={signOut} />
       </View>
+    );
+  }
+
+  if (isManager && service?.require_mfa && aal.current !== 'aal2') {
+    return (
+      <Screen>
+        <Card title="Two-factor login required">
+          <Text style={styles.hint}>
+            {profile.organizationName} requires managers to sign in with a second factor before they can see employee data.
+          </Text>
+          <MfaSetup required />
+        </Card>
+        <Button title="Sign out" variant="ghost" onPress={signOut} />
+      </Screen>
     );
   }
 
@@ -59,10 +74,16 @@ export default function AppLayout() {
         <Stack.Screen name="acknowledgements" options={inner('Notice Acknowledgements')} />
         <Stack.Screen name="notice-history" options={inner('Notice History')} />
         <Stack.Screen name="audit-log" options={inner('Audit Log')} />
+        <Stack.Screen name="alerts" options={inner('Alerts')} />
+        <Stack.Screen name="categories" options={inner('Productivity Categories')} />
+        <Stack.Screen name="teams" options={inner('Teams')} />
+        <Stack.Screen name="billing" options={inner('Subscription & Billing')} />
+        <Stack.Screen name="support-access" options={inner('Support Access')} />
       </Stack.Protected>
       <Stack.Protected guard={!isManager}>
         <Stack.Screen name="me" options={{ title: 'My Activity' }} />
       </Stack.Protected>
+      <Stack.Screen name="requests" options={inner('Privacy Requests')} />
       <Stack.Screen name="app-usage" options={inner('App Details')} />
       <Stack.Screen name="website" options={inner('Website Details')} />
       <Stack.Screen name="day" options={inner('Daily Details')} />

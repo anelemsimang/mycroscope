@@ -12,10 +12,13 @@ import { formatDateTime } from '@/lib/format';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
+const NO_TEAM = 'none';
+
 export default function ManageEmployee() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const profile = useProfile();
   const { data: emp, error: loadError, reload } = useAsync(() => api.employee(id), [id]);
+  const teams = useAsync(async () => (profile.role === 'owner' ? (await api.teams()).teams : []), [profile.role]);
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('employee');
   const [active, setActive] = useState(true);
@@ -94,6 +97,15 @@ export default function ManageEmployee() {
         ) : null}
         {canEdit ? <Button title="Save changes" onPress={save} disabled={!changed} loading={busy === 'save'} /> : null}
       </Card>
+
+      {profile.role === 'owner' && !isOwnerAccount && (teams.data?.length ?? 0) > 0 ? (
+        <Card title="Team">
+          <Segmented value={emp.team_id ?? NO_TEAM}
+            onChange={(t) => run('team', () => api.setEmployeeTeam(emp.id, t === NO_TEAM ? null : t), reload)}
+            options={[{ value: NO_TEAM, label: 'No team' }, ...(teams.data ?? []).map((t) => ({ value: t.id, label: t.name }))]} />
+          <Text style={styles.hint}>Managers of a team see only that team's people.</Text>
+        </Card>
+      ) : null}
 
       {!emp.auth_user_id ? (
         activation ? (

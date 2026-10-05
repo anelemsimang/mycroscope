@@ -32,7 +32,8 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
-  const { session, isLoading } = useSession();
+  const { session, isLoading, operator, needsMfaChallenge } = useSession();
+  const signedIn = !!session && !needsMfaChallenge;
   const pathname = usePathname();
   useEffect(() => {
     if (!isLoading) SplashScreen.hide();
@@ -44,14 +45,25 @@ function RootNavigator() {
     // Only for the address the app was opened with.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
+  useEffect(() => {
+    if (!isLoading && signedIn && operator && !pathname.startsWith('/operator') && !pathname.startsWith('/auth/')) {
+      router.replace('/operator');
+    }
+  }, [isLoading, signedIn, operator, pathname]);
   if (isLoading) return null;
 
   return (
     <>
     <StatusBar style={session ? 'light' : 'dark'} />
     <Stack screenOptions={headerOptions}>
-      <Stack.Protected guard={!!session}>
+      <Stack.Protected guard={!!session && needsMfaChallenge}>
+        <Stack.Screen name="mfa" options={{ title: 'Two-factor login', headerBackVisible: false }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && !operator}>
         <Stack.Screen name="(app)" options={{ headerShown: false }} />
+      </Stack.Protected>
+      <Stack.Protected guard={signedIn && operator}>
+        <Stack.Screen name="operator" options={{ headerShown: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!session}>
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />

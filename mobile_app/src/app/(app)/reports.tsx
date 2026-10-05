@@ -9,7 +9,7 @@ import { api, errorMessage, type DailyTotal, type EmployeeRow } from '@/lib/api'
 import { notify } from '@/lib/dialog';
 import { sharePdf, shareCsv } from '@/lib/export';
 import {
-  PERIOD_LABELS, formatDay, formatDuration, htmlEscape, percent, periodRange, toCsv, todayIn, type PeriodKey,
+  PERIOD_LABELS, formatDay, formatDuration, formatTime, htmlEscape, percent, periodRange, toCsv, todayIn, type PeriodKey,
 } from '@/lib/format';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -32,7 +32,7 @@ export default function Reports() {
   const [period, setPeriod] = useState<PeriodKey>('this_week');
   const [who, setWho] = useState<string>(ALL);
   const [project, setProject] = useState<string>(ALL);
-  const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
+  const [exporting, setExporting] = useState<'csv' | 'pdf' | 'timesheet' | null>(null);
   const range = periodRange(period, todayIn(profile.timezone));
   const projectId = project === ALL ? null : project;
 
@@ -85,6 +85,31 @@ export default function Reports() {
       await shareCsv(`mycroscope_${scopeName}${projectName ? `_${projectName}` : ''}_${range.from}_${range.to}`, toCsv(
         ['date', 'employee', 'employee_code', 'project', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'active_hours'],
         rows));
+    } catch (e) {
+      notify('Export failed', errorMessage(e));
+    } finally {
+      setExporting(null);
+    }
+  }
+
+  /** One row per person per day with first/last activity, for payroll and time-and-attendance. */
+  async function exportTimesheet() {
+    if (!data) return;
+    setExporting('timesheet');
+    try {
+      const hours = (s: number) => (s / 3600).toFixed(2);
+      const rows = data.flatMap((l) => l.days.filter((d) => d.first_activity_at).map((d) => {
+        const span = (Date.parse(d.last_activity_at!) - Date.parse(d.first_activity_at!)) / 1000;
+        return [
+          d.day, l.employee.name, l.employee.employee_code,
+          formatTime(d.first_activity_at, profile.timezone), formatTime(d.last_activity_at, profile.timezone),
+          hours(span), hours(d.active_seconds), hours(d.idle_seconds), hours(d.paused_seconds),
+        ];
+      }));
+      await logExport('timesheet_csv');
+      await shareCsv(`mycroscope_timesheet_${scopeName}_${range.from}_${range.to}`, toCsv(
+        ['date', 'employee', 'employee_code', `first_activity (${profile.timezone})`, 'last_activity', 'span_hours',
+          'active_hours', 'idle_hours', 'paused_hours'], rows));
     } catch (e) {
       notify('Export failed', errorMessage(e));
     } finally {
@@ -207,6 +232,11 @@ export default function Reports() {
               <Button title="Export PDF" onPress={exportPdf} loading={exporting === 'pdf'} disabled={!data.length} />
             </View>
           </View>
+          <Button title="Export timesheet (CSV)" variant="secondary" onPress={exportTimesheet}
+            loading={exporting === 'timesheet'} disabled={!data.length} />
+          <Text style={[styles.hint, { textAlign: 'center' }]}>
+            Timesheet: first and last activity per day plus active, idle and paused hours, for payroll.
+          </Text>
           <Text style={[styles.hint, { color: colors.muted, textAlign: 'center' }]}>Exports are recorded in the audit log.</Text>
         </>
       ) : null}

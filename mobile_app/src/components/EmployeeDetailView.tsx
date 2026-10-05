@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
+import { CategoryTotalsCard } from '@/components/CategoryTotals';
 import { Timeline } from '@/components/Timeline';
 import {
   BarRow, Button, Card, Empty, ErrorBanner, InfoGrid, InnerTabs, LinkRow, Loading, Screen, SectionTitle, Segmented,
@@ -99,7 +100,7 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
         {tab === 'activity' ? <ActivityTab id={id} timezone={timezone} today={today} status={status} /> : null}
         {tab === 'apps' ? (
           <AppsWeb id={id} name={employee.name} timezone={timezone} today={today} period={period} setPeriod={setPeriod}
-            project={project} setProject={setProject} />
+            project={project} setProject={setProject} canEditCategories={canManage} />
         ) : null}
         {tab === 'history' ? <History id={id} name={employee.name} timezone={timezone} today={today} isSelf={isSelf} /> : null}
 
@@ -202,20 +203,21 @@ function ActivityTab({ id, timezone, today, status }: { id: string; timezone: st
   );
 }
 
-function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setProject }: {
+function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setProject, canEditCategories }: {
   id: string; name: string; timezone: string; today: string; period: PeriodKey; setPeriod: (p: PeriodKey) => void;
-  project: string; setProject: (p: string) => void;
+  project: string; setProject: (p: string) => void; canEditCategories: boolean;
 }) {
   const range = periodRange(period, today);
   const projectId = project === ALL_PROJECTS ? null : project;
   const projectList = useAsync(() => api.projects(), []);
   const { data, error, loading, refresh } = useAsync(async () => {
-    const [apps, domains, projects] = await Promise.all([
+    const [apps, domains, projects, categories] = await Promise.all([
       api.appTotals(id, range.from, range.to, projectId),
       api.domainTotals(id, range.from, range.to, projectId),
       api.projectTotals(id, range.from, range.to),
+      api.categoryTotals(id, range.from, range.to, projectId).catch(() => []),
     ]);
-    return { apps, domains, projects };
+    return { apps, domains, projects, categories };
   }, [id, range.from, range.to, projectId]);
   const projectMax = Math.max(0, ...(data?.projects ?? []).map((p) => p.active_seconds));
   const projectName = projectList.data?.find((p) => p.id === projectId)?.name;
@@ -243,6 +245,7 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setPro
       {loading && !data ? <Loading /> : null}
       {data ? (
         <>
+          <CategoryTotalsCard totals={data.categories} canEdit={canEditCategories} />
           <Card title={`Application Summary (${data.apps.length})`}>
             {data.apps.length === 0 ? <Empty text="No applications recorded for this period." /> : null}
             {data.apps.map((a) => (

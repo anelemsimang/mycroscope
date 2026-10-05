@@ -34,6 +34,8 @@ export const stateColor: Record<ActivityState, string> = {
   away: colors.away,
   paused: '#7c3aed',
   logged_out: colors.away,
+  off_hours: colors.away,
+  inactive: colors.away,
 };
 
 export const stateLabel: Record<ActivityState, string> = {
@@ -42,6 +44,8 @@ export const stateLabel: Record<ActivityState, string> = {
   away: 'Away',
   paused: 'Paused',
   logged_out: 'Signed out',
+  off_hours: 'Outside working hours',
+  inactive: 'Not recording (subscription)',
 };
 
 export function Screen({ children, refreshing, onRefresh, padded = true }: PropsWithChildren<{
