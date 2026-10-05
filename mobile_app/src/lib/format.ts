@@ -18,6 +18,23 @@ export function weekdayIndex(day: Ymd): number {
   return (new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7;
 }
 
+function zoneOffsetMs(utcMs: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(utcMs));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value);
+  return Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second')) - utcMs;
+}
+
+/** The UTC instant at which `day` starts (00:00) in `timeZone`, as an ISO string. */
+export function dayStartUtc(day: Ymd, timeZone: string): string {
+  const naive = Date.parse(`${day}T00:00:00Z`);
+  let utc = naive - zoneOffsetMs(naive, timeZone);
+  utc = naive - zoneOffsetMs(utc, timeZone);
+  return new Date(utc).toISOString();
+}
+
 export function daysBetween(from: Ymd, to: Ymd): number {
   return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
 }

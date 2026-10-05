@@ -68,7 +68,7 @@ export default function ManageEmployee() {
       'This permanently deletes the employee and ALL of their recorded activity. It cannot be undone.',
       'Delete',
     );
-    if (ok) run('delete', () => api.deleteEmployee(emp!.id, deleteReason.trim()), () => router.dismissTo('/employees'));
+    if (ok) run('delete', () => api.deleteEmployee(emp!.id, deleteReason.trim()), () => router.dismissTo('/'));
   }
 
   return (

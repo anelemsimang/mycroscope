@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Text, View } from 'react-native';
 
-import { colors } from '@/components/ui';
+import { headerOptions } from '@/components/ui';
 import { SessionProvider, useSession } from '@/lib/session';
 import { isConfigured } from '@/lib/supabase';
 
@@ -25,7 +25,6 @@ export default function RootLayout() {
   }
   return (
     <SessionProvider>
-      <StatusBar style="dark" />
       <RootNavigator />
     </SessionProvider>
   );
@@ -39,15 +38,18 @@ function RootNavigator() {
   if (isLoading) return null;
 
   return (
-    <Stack screenOptions={{ headerTintColor: colors.primary, contentStyle: { backgroundColor: colors.background } }}>
+    <>
+    <StatusBar style={session ? 'light' : 'dark'} />
+    <Stack screenOptions={headerOptions}>
       <Stack.Protected guard={!!session}>
         <Stack.Screen name="(app)" options={{ headerShown: false }} />
       </Stack.Protected>
       <Stack.Protected guard={!session}>
         <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-        <Stack.Screen name="sign-up" options={{ title: 'Create your organisation' }} />
+        <Stack.Screen name="sign-up" options={{ title: 'Organisation Registration' }} />
         <Stack.Screen name="forgot-password" options={{ title: 'Reset password' }} />
       </Stack.Protected>
     </Stack>
+    </>
   );
 }

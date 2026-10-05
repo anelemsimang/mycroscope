@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { addDays, csvEscape, formatDuration, periodRange, todayIn, weekdayIndex } from './format.ts';
+import { addDays, csvEscape, dayStartUtc, formatDuration, periodRange, todayIn, weekdayIndex } from './format.ts';
+
+test('local midnight as a UTC instant, including DST changes', () => {
+  assert.equal(dayStartUtc('2026-10-06', 'Africa/Johannesburg'), '2026-10-05T22:00:00.000Z');
+  assert.equal(dayStartUtc('2026-10-06', 'UTC'), '2026-10-06T00:00:00.000Z');
+  assert.equal(dayStartUtc('2026-03-29', 'Europe/London'), '2026-03-29T00:00:00.000Z'); // DST starts at 01:00
+  assert.equal(dayStartUtc('2026-03-30', 'Europe/London'), '2026-03-29T23:00:00.000Z');
+  assert.equal(dayStartUtc('2026-07-01', 'America/New_York'), '2026-07-01T04:00:00.000Z');
+});
 
 test('today in Johannesburg crosses midnight before UTC does', () => {
   assert.equal(todayIn('Africa/Johannesburg', new Date('2026-10-05T22:30:00Z')), '2026-10-06');

@@ -1,17 +1,22 @@
 import { Stack, router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 
-import { Button, colors } from '@/components/ui';
+import { Button, headerOptions } from '@/components/ui';
 import { useSession } from '@/lib/session';
 
-function BackToList() {
+/** Shown in place of the back arrow when there is no history (e.g. after a browser refresh). */
+function HomeButton() {
   return (
-    <Pressable hitSlop={8} style={{ paddingRight: 12 }} accessibilityRole="button" accessibilityLabel="Back to employees"
+    <Pressable hitSlop={8} style={{ paddingRight: 12 }} accessibilityRole="button" accessibilityLabel="Dashboard"
       onPress={() => router.replace('/')}>
-      <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>‹ Employees</Text>
+      <Text style={{ color: '#fff', fontWeight: '600', fontSize: 15 }}>‹ Dashboard</Text>
     </Pressable>
   );
 }
+
+const withHome = (title: string) => ({ navigation }: { navigation: { canGoBack: () => boolean } }) => ({
+  title, ...(navigation.canGoBack() ? {} : { headerLeft: () => <HomeButton /> }),
+});
 
 export default function AppLayout() {
   const { profile, isManager, reloadProfile, signOut } = useSession();
@@ -27,21 +32,22 @@ export default function AppLayout() {
   }
 
   return (
-    <Stack screenOptions={{ headerTintColor: colors.primary, contentStyle: { backgroundColor: colors.background } }}>
+    <Stack screenOptions={headerOptions}>
       <Stack.Protected guard={isManager}>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="employee/[id]" options={({ navigation }) => ({
-          title: 'Activity', ...(navigation.canGoBack() ? {} : { headerLeft: () => <BackToList /> }),
-        })} />
-        <Stack.Screen name="manage/[id]" options={({ navigation }) => ({
-          title: 'Manage employee', ...(navigation.canGoBack() ? {} : { headerLeft: () => <BackToList /> }),
-        })} />
-        <Stack.Screen name="add-employee" options={{ title: 'Add employee', presentation: 'modal' }} />
+        <Stack.Screen name="index" options={{ title: 'Mycroscope Dashboard' }} />
+        <Stack.Screen name="reports" options={withHome('Professional Report')} />
+        <Stack.Screen name="register" options={withHome('Register Employee')} />
+        <Stack.Screen name="employee/[id]" options={withHome('Employee Details')} />
+        <Stack.Screen name="manage/[id]" options={withHome('Manage Employee')} />
+        <Stack.Screen name="delete-activity" options={withHome('Delete Activity')} />
       </Stack.Protected>
       <Stack.Protected guard={!isManager}>
-        <Stack.Screen name="me" options={{ title: 'My activity' }} />
+        <Stack.Screen name="me" options={{ title: 'My Activity' }} />
       </Stack.Protected>
-      <Stack.Screen name="account" options={{ title: 'Account' }} />
+      <Stack.Screen name="app-usage" options={withHome('App Details')} />
+      <Stack.Screen name="website" options={withHome('Website Details')} />
+      <Stack.Screen name="day" options={withHome('Daily Details')} />
+      <Stack.Screen name="settings" options={withHome('Settings')} />
     </Stack>
   );
 }

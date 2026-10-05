@@ -9,7 +9,7 @@ import type { ActivityState } from '@/lib/api';
 export const colors = {
   primary: '#1e3a8a',
   primaryLight: '#dbeafe',
-  background: '#f5f7fb',
+  background: '#f8fafc',
   card: '#ffffff',
   text: '#1f2937',
   muted: '#6b7280',
@@ -18,6 +18,14 @@ export const colors = {
   success: '#059669',
   warning: '#d97706',
   away: '#9ca3af',
+};
+
+/** Navy header bar with white text, used by every stack. */
+export const headerOptions = {
+  headerStyle: { backgroundColor: colors.primary },
+  headerTintColor: '#ffffff',
+  headerTitleStyle: { fontWeight: 'bold' as const },
+  contentStyle: { backgroundColor: colors.background },
 };
 
 export const stateColor: Record<ActivityState, string> = {
@@ -44,7 +52,7 @@ export function Screen({ children, refreshing, onRefresh, padded = true }: Props
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={[
         { width: '100%', maxWidth: 820, alignSelf: 'center' },
-        padded ? { padding: 16, paddingBottom: 40, gap: 12 } : null,
+        padded ? { padding: 12, paddingBottom: 40, gap: 12 } : null,
       ]}
       keyboardShouldPersistTaps="handled"
       refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> : undefined}>
@@ -213,17 +221,120 @@ export function Empty({ text }: { text: string }) {
   return <Text style={[styles.hint, { textAlign: 'center', paddingVertical: 16 }]}>{text}</Text>;
 }
 
+export function SectionTitle({ children }: PropsWithChildren) {
+  return <Text style={styles.sectionTitle}>{children}</Text>;
+}
+
+/** Row of white stat boxes (the dashboard's "number over label" cards). */
+export function StatGrid({ items }: { items: { label: string; value: string; color?: string }[] }) {
+  return (
+    <View style={styles.statGrid}>
+      {items.map((s) => (
+        <View key={s.label} style={styles.statBox}>
+          <Text style={[styles.statNumber, s.color ? { color: s.color } : null]} numberOfLines={1}>{s.value}</Text>
+          <Text style={styles.statLabel}>{s.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export function InnerTabs<T extends string>({ tabs, value, onChange }: {
+  tabs: { value: T; label: string }[]; value: T; onChange: (v: T) => void;
+}) {
+  return (
+    <View style={styles.tabBar}>
+      {tabs.map((t) => (
+        <Pressable key={t.value} onPress={() => onChange(t.value)} accessibilityRole="tab"
+          accessibilityState={{ selected: t.value === value }}
+          style={[styles.tab, t.value === value && styles.tabActive]}>
+          <Text style={[styles.tabText, t.value === value && styles.tabTextActive]} numberOfLines={1}>{t.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+export function InfoGrid({ items }: { items: { label: string; value: string }[] }) {
+  return (
+    <View style={styles.infoGrid}>
+      {items.map((i) => (
+        <View key={i.label} style={styles.infoItem}>
+          <Text style={styles.infoLabel}>{i.label}</Text>
+          <Text style={styles.infoValue} selectable>{i.value}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** Tappable list row with a chevron, used to drill into details. */
+export function LinkRow({ title, subtitle, right, onPress }: {
+  title: string; subtitle?: string | null; right?: string; onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={onPress} style={({ pressed }) => [styles.linkRow, pressed && { opacity: 0.6 }]}>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.rowText, { fontWeight: '600' }]} numberOfLines={1}>{title}</Text>
+        {subtitle ? <Text style={styles.hint} numberOfLines={1}>{subtitle}</Text> : null}
+      </View>
+      {right ? <Text style={styles.rowText}>{right}</Text> : null}
+      <Text style={styles.chevron}>›</Text>
+    </Pressable>
+  );
+}
+
+/** Compact navy action button used in the dashboard's Quick Actions row. */
+export function ActionButton({ title, onPress }: { title: string; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button"
+      style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}>
+      <Text style={styles.actionButtonText} numberOfLines={2}>{title}</Text>
+    </Pressable>
+  );
+}
+
 export const styles = StyleSheet.create({
-  card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, gap: 6 },
+  card: {
+    backgroundColor: colors.card, borderRadius: 8, padding: 12, gap: 6,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2, elevation: 1,
+  },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
-  button: { borderRadius: 10, paddingVertical: 13, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  cardTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
+  sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.text, marginTop: 4 },
+  statGrid: { flexDirection: 'row', gap: 8 },
+  statBox: {
+    flex: 1, backgroundColor: colors.card, borderRadius: 8, padding: 12, alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.06, shadowRadius: 2, elevation: 1,
+  },
+  statNumber: { fontSize: 18, fontWeight: '700', color: colors.primary, marginBottom: 2 },
+  statLabel: { fontSize: 11, color: colors.muted, textAlign: 'center' },
+  tabBar: { flexDirection: 'row', backgroundColor: colors.card, borderRadius: 8, padding: 4, gap: 4 },
+  tab: { flex: 1, paddingVertical: 9, borderRadius: 6, alignItems: 'center' },
+  tabActive: { backgroundColor: colors.primary },
+  tabText: { fontSize: 13, fontWeight: '600', color: colors.muted },
+  tabTextActive: { color: '#fff' },
+  infoGrid: { flexDirection: 'row', flexWrap: 'wrap', rowGap: 10 },
+  infoItem: { width: '50%', paddingRight: 8 },
+  infoLabel: { fontSize: 11, color: colors.muted, marginBottom: 2 },
+  infoValue: { fontSize: 14, fontWeight: '600', color: colors.text },
+  linkRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10,
+    borderBottomWidth: 1, borderBottomColor: '#f3f4f6',
+  },
+  chevron: { fontSize: 20, color: colors.muted, marginLeft: 2 },
+  actionButton: {
+    flex: 1, backgroundColor: colors.primary, paddingVertical: 12, paddingHorizontal: 8, borderRadius: 6,
+    alignItems: 'center', justifyContent: 'center', minHeight: 44,
+  },
+  actionButtonText: { color: '#fff', fontSize: 13, fontWeight: '600', textAlign: 'center' },
+  button: { borderRadius: 8, paddingVertical: 13, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
   buttonSmall: { paddingVertical: 8, paddingHorizontal: 12 },
   buttonText: { fontSize: 15, fontWeight: '600' },
   label: { fontSize: 13, fontWeight: '600', color: colors.text },
   hint: { fontSize: 12, color: colors.muted },
   input: {
-    borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11,
+    borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 11,
     fontSize: 15, color: colors.text, backgroundColor: '#fff',
   },
   reveal: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center', paddingHorizontal: 14 },

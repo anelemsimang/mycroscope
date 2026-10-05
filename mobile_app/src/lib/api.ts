@@ -67,6 +67,32 @@ export interface EmployeeRow {
   created_at: string;
 }
 
+export interface AgentStatus {
+  state: ActivityState;
+  app_name: string | null;
+  window_title: string | null;
+  url: string | null;
+  domain: string | null;
+  project_name: string | null;
+  last_seen_at: string;
+  is_online: boolean;
+}
+
+export interface SegmentRow {
+  started_at: string;
+  ended_at: string;
+  state: 'active' | 'idle';
+  app_name: string | null;
+  window_title: string | null;
+  url: string | null;
+  domain: string | null;
+}
+
+/** PostgREST returns at most this many rows per request (Supabase default). */
+export const SEGMENT_LIMIT = 1000;
+
+const ONLINE_WINDOW_MS = 2 * 60 * 1000;
+
 export interface ActivationResult { employee_id?: string; employee_code: string; activation_code: string; expires_at: string }
 
 /** Turns PostgREST/GoTrue errors into a message suitable for an alert. */
@@ -153,6 +179,43 @@ export const api = {
       p_employee: employee, p_name: changes.name ?? null, p_role: changes.role ?? null,
       p_is_active: changes.is_active ?? null,
     }),
+
+  agentStatus: async (employee: string): Promise<AgentStatus | null> => {
+    const { data, error } = await supabase
+      .from('agent_status')
+      .select('state,app_name,window_title,url,domain,last_seen_at,projects(name)')
+      .eq('employee_id', employee)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    const project = data.projects as { name: string } | { name: string }[] | null;
+    return {
+      state: data.state as ActivityState,
+      app_name: data.app_name, window_title: data.window_title, url: data.url, domain: data.domain,
+      project_name: (Array.isArray(project) ? project[0]?.name : project?.name) ?? null,
+      last_seen_at: data.last_seen_at,
+      is_online: data.state !== 'logged_out' && Date.now() - Date.parse(data.last_seen_at) < ONLINE_WINDOW_MS,
+    };
+  },
+
+  /** Active/idle segments overlapping [fromIso, toIso), newest first, for one app or one website. */
+  segments: async (employee: string, fromIso: string, toIso: string, filter: { app?: string; domain?: string }) => {
+    let q = supabase
+      .from('activity_segments')
+      .select('started_at,ended_at,state,app_name,window_title,url,domain')
+      .eq('employee_id', employee)
+      .in('state', ['active', 'idle'])
+      .lt('started_at', toIso)
+      .gt('ended_at', fromIso);
+    if (filter.domain !== undefined) q = q.eq('domain', filter.domain);
+    if (filter.app !== undefined) q = filter.app === 'Unknown' ? q.is('app_name', null) : q.eq('app_name', filter.app);
+    const { data, error } = await q.order('started_at', { ascending: false }).limit(SEGMENT_LIMIT);
+    if (error) throw error;
+    return (data ?? []) as SegmentRow[];
+  },
+
+  deleteActivity: (employee: string, fromIso: string, toIso: string, reason: string) =>
+    rpc<number>('delete_activity', { p_employee: employee, p_from: fromIso, p_to: toIso, p_reason: reason }),
 
   deleteEmployee: (employee: string, reason: string) => rpc<void>('delete_employee', { p_employee: employee, p_reason: reason }),
 
