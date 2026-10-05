@@ -17,6 +17,7 @@ import pystray
 from config import APP_NAME, THEME_COLORS as C, VERSION
 from core.agent import Agent
 from core.api import ApiError, AuthError, NetworkError
+from utils.autostart import mark_stopped_by_user
 from utils.logger import get_logger
 
 log = get_logger("ui")
@@ -367,7 +368,8 @@ class AgentApp:
         elif s.track_web_domains:
             items.append("website domains")
         return ("While you are signed in, Mycroscope records " + ", ".join(items) +
-                ". Your manager can see this. It never records keystrokes, screenshots or file contents.")
+                ". Your manager can see this. It never records keystrokes, screenshots or file contents. "
+                "It starts automatically when you sign in to Windows; signing out stops tracking.")
 
     def _refresh_status(self) -> None:
         w = self.status_widgets
@@ -495,6 +497,7 @@ class AgentApp:
         self._quit()
 
     def _quit(self) -> None:
+        mark_stopped_by_user()
         try:
             self.agent.shutdown()
         finally:

@@ -1,7 +1,10 @@
 """Mycroscope desktop agent.
 
-    python main.py            open the window
-    python main.py --hidden   start in the tray (used when launched at sign-in)
+    main.py                        open the window
+    main.py --hidden               start in the tray (logon task)
+    main.py --watchdog             start only if the agent crashed (watchdog task)
+    main.py --install-autostart    register the logon + watchdog tasks
+    main.py --uninstall-autostart  remove them
 """
 
 import sys
@@ -28,29 +31,67 @@ def _log_unhandled(exc_type, exc, tb) -> None:
     log.critical("Unhandled exception", exc_info=(exc_type, exc, tb))
 
 
-def main() -> int:
+def _selftest() -> int:
+    """Log one probe sample and dependency checks (support diagnostics)."""
+    from zoneinfo import ZoneInfo
+    from config import SUPABASE_URL
+    from core.monitor import SystemMonitor, uia
+    try:
+        ZoneInfo("Africa/Johannesburg")
+        sample = SystemMonitor().sample(True, True, True)
+        log.info("Selftest ok: configured=%s uia=%s idle=%.0fs locked=%s app=%s",
+                 bool(SUPABASE_URL), uia is not None, sample.idle_seconds, sample.locked, sample.app_name)
+        return 0
+    except Exception:
+        log.exception("Selftest failed")
+        return 1
+
+
+def main(argv: list[str]) -> int:
     from config import APP_NAME, SUPABASE_KEY, SUPABASE_URL, VERSION
+    from utils import autostart
+
+    if "--selftest" in argv:
+        return _selftest()
+    if "--install-autostart" in argv:
+        autostart.install()
+        return 0
+    if "--uninstall-autostart" in argv:
+        autostart.uninstall()
+        return 0
 
     sys.excepthook = _log_unhandled
     threading.excepthook = lambda args: _log_unhandled(args.exc_type, args.exc_value, args.exc_traceback)
 
+    watchdog = "--watchdog" in argv
+    if watchdog and autostart.STOP_MARKER.exists():
+        return 0
+
     mutex = _single_instance()
     if mutex is None:
-        log.info("Another instance is already running; exiting")
+        if not watchdog:
+            log.info("Another instance is already running; exiting")
         return 0
+
+    if watchdog:
+        log.warning("Watchdog restarted the agent after an unexpected exit")
+    autostart.clear_stopped_marker()
 
     if not SUPABASE_URL or not SUPABASE_KEY:
         import tkinter.messagebox as mb
         mb.showerror(APP_NAME, "Mycroscope is not configured: SUPABASE_URL and SUPABASE_KEY are missing.\n"
-                               "Put them in the .env file next to the program.")
+                               "Put them in %LOCALAPPDATA%\\Mycroscope\\agent.env.")
         return 2
+
+    if getattr(sys, "frozen", False):
+        threading.Thread(target=autostart.ensure_installed, daemon=True).start()
 
     log.info("Starting %s agent v%s", APP_NAME, VERSION)
     from ui.app_ui import AgentApp
-    AgentApp(start_hidden="--hidden" in sys.argv).run()
+    AgentApp(start_hidden=watchdog or "--hidden" in argv).run()
     log.info("Agent exited")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))
