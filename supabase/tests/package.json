@@ -1,0 +1,16 @@
+{
+  "name": "mycroscope-schema-tests",
+  "version": "1.0.0",
+  "description": "PGlite tests for the Supabase migration",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test schema.test.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  }
+}
