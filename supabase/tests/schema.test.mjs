@@ -39,17 +39,20 @@ const SUPABASE_STUB = `
 
 let db;
 
-async function asRole(role, uid, fn) {
+async function asRole(role, uid, fn, aal = 'aal1') {
   await db.exec(`set role ${role}`);
   await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [uid ?? '']);
+  await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: uid, aal })]);
   try {
     return await fn();
   } finally {
     await db.exec('reset role');
     await db.query(`select set_config('request.jwt.claim.sub', '', false)`);
+    await db.query(`select set_config('request.jwt.claims', '', false)`);
   }
 }
 const asUser = (uid, sql, params = []) => asRole('authenticated', uid, () => db.query(sql, params));
+const asUser2fa = (uid, sql, params = []) => asRole('authenticated', uid, () => db.query(sql, params), 'aal2');
 const asAnon = (sql, params = []) => asRole('anon', null, () => db.query(sql, params));
 
 async function signUp(email, meta) {
@@ -285,12 +288,18 @@ test('changing tracking settings publishes a new notice and requires re-acknowle
   assert.equal(empAudit.rows[0].n, 0, 'employees must not read the audit log');
 });
 
-const COMPLIANCE_SQL = 'select * from save_compliance_settings($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)';
+const COMPLIANCE_SQL = 'select * from save_compliance_settings($1, $2, $3)';
+const settingsArgs = (s, name = null, email = null) => [JSON.stringify(s), name, email];
+const LAPTOP_POLICY = {
+  track_apps: true, track_window_titles: false, track_web_domains: true, track_full_urls: false,
+  idle_threshold_seconds: 600, allow_pause: false, retention_days: 60, summary_retention_days: 365,
+  notice_custom_text: 'Applies to company laptops.',
+};
 
 test('saving settings and the Information Officer together publishes one notice version', async () => {
   const before = await asUser(ctx.ownerAuth, 'select max(version)::int as v from monitoring_policies');
   const saved = await asUser(ctx.ownerAuth, COMPLIANCE_SQL,
-    [true, false, true, false, 600, false, 60, 365, 'Applies to company laptops.', 'Lerato Officer', 'privacy@acme.co.za']);
+    settingsArgs(LAPTOP_POLICY, 'Lerato Officer', 'privacy@acme.co.za'));
   assert.equal(saved.rows[0].version, before.rows[0].v + 1);
   assert.match(saved.rows[0].notice_text, /Lerato Officer \(privacy@acme\.co\.za\)/);
   assert.match(saved.rows[0].notice_text, /Applies to company laptops\./);
@@ -303,19 +312,17 @@ test('saving settings and the Information Officer together publishes one notice 
   assert.equal(published.rows[0].n, 1);
 
   const again = await asUser(ctx.ownerAuth, COMPLIANCE_SQL,
-    [true, false, true, false, 600, false, 60, 365, 'Applies to company laptops.', 'Lerato Officer', 'privacy@acme.co.za']);
+    settingsArgs(LAPTOP_POLICY, 'Lerato Officer', 'privacy@acme.co.za'));
   assert.equal(again.rows[0].version, saved.rows[0].version, 'saving without changes must not publish');
 });
 
 test('compliance settings are validated and limited to managers', async () => {
-  await rejects(asUser(ctx.empAuth, COMPLIANCE_SQL,
-    [true, true, true, true, 300, true, 90, 730, null, null, null]), /Not allowed/);
+  await rejects(asUser(ctx.empAuth, COMPLIANCE_SQL, settingsArgs({ track_apps: true })), /Not allowed/);
   await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL,
-    [true, true, false, true, 300, true, 90, 730, null, null, null]), /only be recorded when websites/);
-  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL,
-    [true, true, true, true, 300, true, 90, 730, null, 'X', 'not-an-email']), /not valid/);
-  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL,
-    [true, true, true, true, 300, true, 3, 730, null, null, null]), /check constraint/);
+    settingsArgs({ track_web_domains: false, track_full_urls: true })), /only be recorded when websites/);
+  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL, settingsArgs({}, 'X', 'not-an-email')), /not valid/);
+  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL, settingsArgs({ retention_days: 3 })), /check constraint/);
+  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL, settingsArgs({ tracking_schedule: 'sometimes' })), /check constraint/);
 });
 
 test('reports can be filtered by project', async () => {
@@ -355,6 +362,8 @@ test('role rules: only the owner manages managers and roles', async () => {
   const mgr = await asUser(ctx.ownerAuth, `select * from create_employee('Mary Manager', 'mary@acme.co.za', 'manager')`);
   const mgrAuth = await signUp('mary@acme.co.za', {
     signup_type: 'employee_activation', employee_code: mgr.rows[0].employee_code, activation_code: mgr.rows[0].activation_code });
+  ctx.mgrAuth = mgrAuth;
+  ctx.mgrId = mgr.rows[0].employee_id;
   await rejects(asUser(mgrAuth, `select * from create_employee('X', 'x2@acme.co.za', 'manager')`), /Only the owner/);
   await rejects(asUser(mgrAuth, `select * from update_employee($1, null, 'manager')`, [ctx.empId]), /Only the owner/);
   await rejects(asUser(mgrAuth, `select * from update_employee($1, 'Owner Renamed')`, [ctx.ownerId]), /Only the owner/);
@@ -388,6 +397,202 @@ test('nightly maintenance builds summaries and purges expired data', async () =>
   assert.equal(summary.rows[0].top_apps[0].app_name, 'Outlook');
   const purge = await db.query(`select details from audit_log where action = 'retention_purge'`);
   assert.ok(purge.rows.length >= 1);
+});
+
+// ---------------------------------------------------------------------------
+// SaaS platform
+// ---------------------------------------------------------------------------
+test('new organisations start a 14-day trial with seat counts', async () => {
+  const s = await asUser(ctx.ownerAuth, 'select * from get_my_service_status()');
+  assert.equal(s.rows[0].level, 'full');
+  assert.equal(s.rows[0].status, 'trialing');
+  assert.equal(s.rows[0].seats, 25);
+  assert.equal(s.rows[0].seats_used, 3);
+  const days = (new Date(s.rows[0].trial_ends_at) - Date.now()) / 86_400_000;
+  assert.ok(days > 13.9 && days <= 14.01);
+  await rejects(asUser(ctx.ownerAuth, 'update subscriptions set seats = 999'), /permission denied/);
+  const empView = await asUser(ctx.empAuth, 'select count(*)::int as n from subscriptions');
+  assert.equal(empView.rows[0].n, 0, 'employees must not see billing');
+});
+
+test('seat limits block new employees and reactivation', async () => {
+  await db.query('update subscriptions set seats = 3 where organization_id = $1', [ctx.orgId]);
+  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Extra', 'extra@acme.co.za')`), /seats on your plan/);
+  await db.query('update subscriptions set seats = 25 where organization_id = $1', [ctx.orgId]);
+});
+
+test('an expired trial makes the organisation read-only', async () => {
+  await db.query(`update subscriptions set trial_ends_at = now() - interval '1 hour' where organization_id = $1`, [ctx.orgId]);
+  const s = await asUser(ctx.ownerAuth, 'select level from get_my_service_status()');
+  assert.equal(s.rows[0].level, 'read_only');
+  await rejects(insertSegment(ctx.empAuth, segment({ start: minutesAgo(9), end: minutesAgo(8) })), /row-level security/);
+  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Late', 'late@acme.co.za')`), /subscription is not active/);
+  const still = await asUser(ctx.ownerAuth, 'select count(*)::int as n from activity_segments');
+  assert.ok(still.rows[0].n > 0, 'existing data stays readable');
+
+  await db.query(`update subscriptions set status = 'active', current_period_end = now() - interval '3 days'
+                  where organization_id = $1`, [ctx.orgId]);
+  const grace = await asUser(ctx.ownerAuth, 'select level, grace_until from get_my_service_status()');
+  assert.equal(grace.rows[0].level, 'full', 'paid organisations keep working during the grace period');
+  await insertSegment(ctx.empAuth, segment({ start: minutesAgo(9), end: minutesAgo(8) }));
+});
+
+test('working hours appear in the notice and is_work_time handles overnight shifts', async () => {
+  await asUser(ctx.ownerAuth, COMPLIANCE_SQL, settingsArgs({
+    tracking_schedule: 'work_hours', work_days: [1, 2, 3, 4, 5], work_start: '08:00', work_end: '17:00',
+    flag_after_hours_use: true }, 'Lerato Officer', 'privacy@acme.co.za'));
+  const notice = await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()');
+  assert.match(notice.rows[0].notice_text, /Monday, Tuesday, Wednesday, Thursday, Friday, 08:00 to 17:00 \(Africa\/Johannesburg/);
+  assert.match(notice.rows[0].notice_text, /computer was in use \(not what it was used for\)/);
+  assert.match(notice.rows[0].notice_text, /INTEGRITY CHECKS/);
+  assert.equal(notice.rows[0].settings.tracking_schedule, 'work_hours');
+
+  // 2026-10-05 is a Monday. 10:00 SAST = 08:00Z.
+  const at = async (iso) => (await db.query('select is_work_time($1, $2) as w', [ctx.orgId, iso])).rows[0].w;
+  assert.equal(await at('2026-10-05T08:00:00Z'), true);
+  assert.equal(await at('2026-10-05T16:00:00Z'), false);
+  assert.equal(await at('2026-10-04T08:00:00Z'), false, 'Sunday');
+  await db.query(`update organization_settings set work_start = '22:00', work_end = '06:00' where organization_id = $1`, [ctx.orgId]);
+  assert.equal(await at('2026-10-05T21:00:00Z'), true, 'Monday 23:00 starts the night shift');
+  assert.equal(await at('2026-10-06T02:00:00Z'), true, 'Tuesday 04:00 belongs to Monday night');
+  assert.equal(await at('2026-10-05T02:00:00Z'), false, 'Monday 04:00 belongs to Sunday night, not a work day');
+  await db.query(`update organization_settings set work_start = '08:00', work_end = '17:00' where organization_id = $1`, [ctx.orgId]);
+});
+
+test('requiring two-factor login limits managers without it, without a new notice', async () => {
+  const before = await asUser(ctx.ownerAuth, 'select max(version)::int as v from monitoring_policies');
+  await asUser(ctx.ownerAuth, COMPLIANCE_SQL, settingsArgs({ require_mfa: true }, 'Lerato Officer', 'privacy@acme.co.za'));
+  const after = await asUser(ctx.ownerAuth, 'select max(version)::int as v from monitoring_policies');
+  assert.equal(after.rows[0].v, before.rows[0].v, 'the two-factor setting must not need re-acknowledgement');
+
+  const without = await asUser(ctx.ownerAuth, 'select count(*)::int as n from get_team_overview()');
+  assert.equal(without.rows[0].n, 0);
+  const own = await asUser(ctx.ownerAuth, 'select count(*)::int as n from employees');
+  assert.equal(own.rows[0].n, 1, 'without a second factor the owner sees only themselves');
+  const withMfa = await asUser2fa(ctx.ownerAuth, 'select count(*)::int as n from get_team_overview()');
+  assert.ok(withMfa.rows[0].n >= 3);
+  await rejects(asUser2fa(ctx.mgrAuth, COMPLIANCE_SQL, settingsArgs({ require_mfa: false })), /Only the owner/);
+  await asUser2fa(ctx.ownerAuth, COMPLIANCE_SQL, settingsArgs({ require_mfa: false }, 'Lerato Officer', 'privacy@acme.co.za'));
+});
+
+test('team managers see only their teams', async () => {
+  const team = await asUser(ctx.ownerAuth, `select id from save_team(null, 'Dispatch')`);
+  ctx.teamId = team.rows[0].id;
+  await asUser(ctx.ownerAuth, 'select set_team_managers($1, $2)', [ctx.teamId, [ctx.mgrId]]);
+  const none = await asUser(ctx.mgrAuth, 'select employee_id from get_team_overview()');
+  assert.deepEqual(none.rows.map((r) => r.employee_id), [ctx.mgrId], 'the team is empty, so only herself');
+  await rejects(asUser(ctx.mgrAuth, `select delete_activity($1, now() - interval '1 hour', now(), 'x')`, [ctx.empId]), /Not allowed/);
+
+  await asUser(ctx.ownerAuth, 'select set_employee_team($1, $2)', [ctx.empId, ctx.teamId]);
+  const some = await asUser(ctx.mgrAuth, 'select employee_id, team_name from get_team_overview() where employee_id = $1', [ctx.empId]);
+  assert.equal(some.rows[0].team_name, 'Dispatch');
+  await rejects(asUser(ctx.mgrAuth, `select save_team(null, 'Mine')`), /Only the owner/);
+  const added = await asUser(ctx.mgrAuth, `select * from create_employee('Team Member', 'member@acme.co.za')`);
+  const member = await db.query('select team_id from employees where id = $1', [added.rows[0].employee_id]);
+  assert.equal(member.rows[0].team_id, ctx.teamId, 'a team manager adds people to their own team');
+});
+
+test('productivity categories classify apps and websites (including subdomains)', async () => {
+  await asUser(ctx.ownerAuth, `select set_app_category('domain', 'https://www.YouTube.com/watch', 'unproductive')`);
+  await asUser(ctx.ownerAuth, `select set_app_category('app', 'Microsoft Excel', 'productive')`);
+  await rejects(asUser(ctx.empAuth, `select set_app_category('app', 'Solitaire', 'productive')`), /Not allowed/);
+  const pattern = await asUser(ctx.ownerAuth, `select pattern from app_categories where kind = 'domain'`);
+  assert.equal(pattern.rows[0].pattern, 'youtube.com');
+  const cat = async (app, domain) =>
+    (await asUser(ctx.ownerAuth, 'select category_of($1, $2, $3) as c', [ctx.orgId, app, domain])).rows[0].c;
+  assert.equal(await cat('Google Chrome', 'm.youtube.com'), 'unproductive');
+  assert.equal(await cat('Google Chrome', 'notyoutube.com'), 'uncategorised');
+  assert.equal(await cat('microsoft excel', null), 'productive');
+
+  const totals = await asUser(ctx.ownerAuth,
+    `select category, active_seconds::int from get_category_totals($1, '2026-10-03', '2026-10-03')`, [ctx.empId]);
+  assert.deepEqual(totals.rows, [{ category: 'uncategorised', active_seconds: 1800 }]);
+});
+
+test('employees send POPIA requests and managers respond', async () => {
+  const req = await asUser(ctx.empAuth, `select * from submit_data_request('access', 'Please send me my data')`);
+  const id = req.rows[0].id;
+  await rejects(asUser(ctx.empAuth, `select respond_data_request($1, 'completed', 'done')`, [id]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth, `select respond_data_request($1, 'completed', '')`, [id]), /Write a response/);
+  await asUser(ctx.ownerAuth, `select respond_data_request($1, 'completed', 'Export attached by email')`, [id]);
+  const mine = await asUser(ctx.empAuth, 'select status, response from data_requests');
+  assert.deepEqual(mine.rows, [{ status: 'completed', response: 'Export attached by email' }]);
+  const other = await asUser(ctx.otherOwnerAuth, 'select count(*)::int as n from data_requests');
+  assert.equal(other.rows[0].n, 0);
+});
+
+test('integrity events reach managers as alerts', async () => {
+  await asUser(ctx.empAuth, `
+    insert into agent_events (id, organization_id, employee_id, device_id, occurred_at, event_type, details)
+    values ($1, $2, $3, $4, now() - interval '5 minutes', 'agent_gap', '{"minutes": 25}')`,
+    [randomUUID(), ctx.orgId, ctx.empId, ctx.deviceId]);
+  const alerts = await asUser(ctx.ownerAuth, `select kind, severity from get_integrity_alerts(now() - interval '1 day')
+                                              where kind = 'agent_gap'`);
+  assert.deepEqual(alerts.rows, [{ kind: 'agent_gap', severity: 'high' }]);
+  const empAlerts = await asUser(ctx.empAuth, `select count(*)::int as n from get_integrity_alerts(now() - interval '1 day')`);
+  assert.equal(empAlerts.rows[0].n, 0);
+});
+
+test('operators manage subscriptions but need customer approval for support access', async () => {
+  await db.query(`insert into platform_admin_invites (email) values ('ops@mycroscope.co.za')`);
+  ctx.opAuth = await signUp('ops@mycroscope.co.za', {});
+  const me = await asUser(ctx.opAuth, 'select am_i_platform_admin() as op');
+  assert.equal(me.rows[0].op, true);
+  await rejects(asUser(ctx.opAuth, 'select * from op_organizations()'), /Two-factor/);
+  await rejects(asUser(ctx.ownerAuth, 'select * from op_organizations()'), /Not allowed/);
+
+  const orgs = await asUser2fa(ctx.opAuth, 'select name, owner_email, active_employees from op_organizations()');
+  assert.ok(orgs.rows.some((o) => o.name === 'Acme Logistics' && o.owner_email === 'owner@acme.co.za'));
+  const seen = await asUser2fa(ctx.opAuth, 'select count(*)::int as n from activity_segments');
+  assert.equal(seen.rows[0].n, 0, 'operators cannot read activity');
+
+  await rejects(asUser2fa(ctx.opAuth, `select op_update_subscription($1, 'standard', 'active', 30, null, now() + interval '30 days', '')`,
+    [ctx.orgId]), /note/);
+  await asUser2fa(ctx.opAuth, `select op_update_subscription($1, 'standard', 'active', 30, null, now() + interval '30 days', 'Paid by EFT')`,
+    [ctx.orgId]);
+  const customerAudit = await asUser(ctx.ownerAuth, `select details from audit_log where action = 'subscription_changed_by_provider'`);
+  assert.equal(customerAudit.rows[0].details.note, 'Paid by EFT');
+
+  await rejects(asUser2fa(ctx.opAuth, 'select * from op_support_snapshot($1)', [ctx.orgId]), /not granted support access/);
+  await rejects(asUser(ctx.mgrAuth, `select grant_support_access(4, 'help')`), /Only the owner/);
+  await asUser(ctx.ownerAuth, `select grant_support_access(4, 'Agent not reporting on LAPTOP-01')`);
+  const snap = await asUser2fa(ctx.opAuth, 'select name, hostname from op_support_snapshot($1)', [ctx.orgId]);
+  assert.ok(snap.rows.some((r) => r.hostname === 'LAPTOP-01'));
+  const used = await asUser(ctx.ownerAuth, `select count(*)::int as n from audit_log where action = 'support_access_used'`);
+  assert.equal(used.rows[0].n, 1);
+  await asUser(ctx.ownerAuth, 'select revoke_support_access()');
+  await rejects(asUser2fa(ctx.opAuth, 'select * from op_support_snapshot($1)', [ctx.orgId]), /not granted/);
+
+  const health = await asUser2fa(ctx.opAuth, 'select organizations, open_data_requests from op_system_health()');
+  assert.ok(health.rows[0].organizations >= 2);
+  const opLog = await asUser2fa(ctx.opAuth, 'select action from op_operator_audit(10)');
+  assert.ok(opLog.rows.some((r) => r.action === 'subscription_updated'));
+});
+
+test('operators can delete only cancelled organisations, with the name typed', async () => {
+  const otherOrg = (await db.query(`select id from organizations where name = 'Other Co'`)).rows[0].id;
+  await rejects(asUser2fa(ctx.opAuth, `select op_delete_organization($1, 'Other Co')`, [otherOrg]), /Only cancelled/);
+  await asUser2fa(ctx.opAuth, `select op_update_subscription($1, null, 'cancelled', null, null, null, 'Customer left')`, [otherOrg]);
+  await rejects(asUser2fa(ctx.opAuth, `select op_delete_organization($1, 'other co')`, [otherOrg]), /exactly/);
+  await asUser2fa(ctx.opAuth, `select op_delete_organization($1, 'Other Co')`, [otherOrg]);
+  const gone = await db.query('select count(*)::int as n from organizations where id = $1', [otherOrg]);
+  assert.equal(gone.rows[0].n, 0);
+  const user = await db.query(`select count(*)::int as n from auth.users where email = 'boss@other.co.za'`);
+  assert.equal(user.rows[0].n, 0);
+});
+
+test('nightly maintenance records its runs', async () => {
+  await db.query('select run_nightly_maintenance()');
+  const runs = await db.query('select count(*)::int as n from maintenance_runs');
+  assert.ok(runs.rows[0].n >= 1);
+});
+
+test('anon cannot reach the new tables or functions', async () => {
+  for (const t of ['subscriptions', 'teams', 'app_categories', 'data_requests', 'platform_admins']) {
+    await rejects(asAnon(`select * from ${t}`), /permission denied/);
+  }
+  await rejects(asAnon('select * from get_my_service_status()'), /permission denied/);
+  await rejects(asUser(ctx.empAuth, 'select * from platform_admin_invites'), /permission denied/);
 });
 
 test('deleting an employee removes their data and is audited', async () => {
