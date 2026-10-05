@@ -1,4 +1,4 @@
-import type { PropsWithChildren, ReactNode } from 'react';
+import { useState, type PropsWithChildren, type ReactNode } from 'react';
 import {
   ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
   type TextInputProps, type ViewStyle,
@@ -83,11 +83,24 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
   );
 }
 
-export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
+export function Field({ label, hint, secureTextEntry, ...props }: TextInputProps & { label: string; hint?: string }) {
+  const [revealed, setRevealed] = useState(false);
   return (
     <View style={{ gap: 4 }}>
       <Text style={styles.label}>{label}</Text>
-      <TextInput placeholderTextColor={colors.muted} style={styles.input} {...props} />
+      <View>
+        <TextInput placeholderTextColor={colors.muted} {...props}
+          style={[styles.input, secureTextEntry ? { paddingRight: 64 } : null]}
+          secureTextEntry={secureTextEntry && !revealed}
+          autoCapitalize={secureTextEntry ? 'none' : props.autoCapitalize}
+          autoCorrect={secureTextEntry ? false : props.autoCorrect} />
+        {secureTextEntry ? (
+          <Pressable onPress={() => setRevealed((r) => !r)} hitSlop={8} style={styles.reveal}
+            accessibilityRole="button" accessibilityLabel={revealed ? `Hide ${label}` : `Show ${label}`}>
+            <Text style={styles.revealText}>{revealed ? 'Hide' : 'Show'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
       {hint ? <Text style={styles.hint}>{hint}</Text> : null}
     </View>
   );
@@ -210,6 +223,8 @@ export const styles = StyleSheet.create({
     borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11,
     fontSize: 15, color: colors.text, backgroundColor: '#fff',
   },
+  reveal: { position: 'absolute', right: 0, top: 0, bottom: 0, justifyContent: 'center', paddingHorizontal: 14 },
+  revealText: { fontSize: 13, fontWeight: '600', color: colors.primary },
   rowText: { fontSize: 14, color: colors.text },
   title: { fontSize: 22, fontWeight: '800', color: colors.primary },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
