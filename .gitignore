@@ -21,8 +21,9 @@ node_modules/
 .expo/
 mobile_app/.expo/
 mobile_app/dist/
-admin_dashboard/.next/
-admin_dashboard/out/
+legacy/admin_dashboard/.next/
+legacy/admin_dashboard/out/
+.netlify/
 *.tsbuildinfo
 
 # Logs / OS

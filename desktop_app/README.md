@@ -1,69 +1,51 @@
-# Mycroscope Desktop App Setup
+# Mycroscope desktop agent (Windows)
 
-## 🚀 Quick Start (For Non-Coders)
+Records which application and website an employee is using, and whether they are active, idle (no input),
+away (locked/asleep) or paused, then uploads it to Supabase. It never records keystrokes, screenshots,
+webcam, microphone or file contents. What it records is set by the organisation (Settings -> Monitoring &
+privacy in the web/mobile app) and shown to the employee in a monitoring notice they must acknowledge.
 
-### Step 1: Install Python
-- Download Python from https://python.org
-- Make sure to check "Add Python to PATH" during installation
+## Run from source (development)
 
-### Step 2: Install Dependencies
-Open Command Prompt/PowerShell in this folder and run:
-```bash
-pip install -r requirements.txt
+```powershell
+cd desktop_app
+python -m venv venv
+.\venv\Scripts\python.exe -m pip install -r requirements.txt
+copy .env.example .env      # then fill in SUPABASE_URL and SUPABASE_KEY (anon/public key only)
+.\venv\Scripts\python.exe main.py
 ```
 
-### Step 3: Set Up Environment
-1. Copy `env_example.txt` and rename it to `.env`
-2. Edit `.env` and replace the placeholder values:
-   - `SUPABASE_URL`: Your Supabase project URL
-   - `SUPABASE_KEY`: Your Supabase anon key
-   - `ENCRYPTION_KEY`: Any 32-character string for security
-   - `ADMIN_PASSWORD`: Password for admin access
+`.env` settings:
 
-### Step 4: Run the App
-```bash
-python main.py
+| Setting | Meaning |
+| --- | --- |
+| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_KEY` | Supabase anon/public key (never the service_role key) |
+| `WEB_APP_URL` | Optional. Web app address; password-reset emails link to `<address>/auth/reset-password` |
+
+## How it behaves
+
+- **Sign-in:** employee code or email and password. New employees activate with the employee code and
+  one-time activation code their manager gets when adding them.
+- **Notice:** tracking only starts after the employee acknowledges the current monitoring notice. When the
+  organisation changes settings, the new notice appears within about 5 minutes; anything it adds is not
+  recorded until the employee acknowledges it, while anything it removes stops immediately.
+- **Tray and taskbar:** while tracking, closing the window minimises it; the tray icon stays. Signing out
+  stops tracking. Pausing (if the organisation allows it) is recorded.
+- **Offline:** activity is queued in a local database and uploaded when the connection returns.
+- **Data and logs:** `%LOCALAPPDATA%\Mycroscope` (`agent.db`, `logs\agent.log`).
+
+## Tests
+
+```powershell
+.\venv\Scripts\python.exe -m unittest tests.test_engine
 ```
 
-## 🔧 What Each Setting Does
+`tests/live_e2e.py` is an optional end-to-end test against a real Supabase project. It creates a throwaway
+"E2E Test" organisation (not removed afterwards) and needs "Confirm email" turned off, or
+`--owner-email/--owner-password` for an already confirmed owner.
 
-- **SUPABASE_URL**: Where your data is stored (like a cloud database)
-- **SUPABASE_KEY**: Password to access your data
-- **ENCRYPTION_KEY**: Keeps your data secure (can be any 32 characters)
-- **ADMIN_PASSWORD**: Password to disable the app (default: admin123)
+## Build and install on employee PCs
 
-## 🛡️ Security Features
-
-- **Auto-launch**: Starts when computer boots
-- **Login required**: Must log in before using computer
-- **Admin protection**: Only admins can disable the app
-- **Encrypted data**: All data is encrypted locally
-
-## 📁 File Structure
-
-```
-desktop_app/
-├── main.py              # Main application
-├── config.py            # Settings and configuration
-├── requirements.txt     # Python packages needed
-├── .env                 # Your credentials (create this)
-├── env_example.txt      # Example credentials
-├── core/                # Core tracking features
-├── utils/               # Utilities and helpers
-└── data/                # Local data storage
-```
-
-## ❓ Common Issues
-
-**"Module not found" error**: Run `pip install -r requirements.txt`
-
-**"Permission denied"**: Run Command Prompt as Administrator
-
-**"Supabase connection failed"**: Check your URL and key in `.env`
-
-## 🔐 Getting Supabase Credentials
-
-1. Go to https://supabase.com
-2. Create a new project
-3. Go to Settings > API
-4. Copy the URL and anon key to your `.env` file 
+See `installer/README.txt` (`build.ps1` produces a self-contained `Mycroscope.exe` plus install/uninstall scripts;
+installation needs no admin rights and starts the agent at sign-in).

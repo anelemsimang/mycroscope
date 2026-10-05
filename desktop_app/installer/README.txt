@@ -6,6 +6,7 @@ Mycroscope desktop agent - installing on an employee PC
 
 2. In dist, copy .env.example to agent.env and fill in SUPABASE_URL and SUPABASE_KEY
    (Supabase -> Project Settings -> API, the anon/public key - never the service_role key).
+   Optionally set WEB_APP_URL to the web app's address so password-reset emails open its reset page.
 
 3. Copy the dist folder to the employee PC (USB, network share, zip) and, signed in as the employee, run:
        powershell -ExecutionPolicy Bypass -File install.ps1
