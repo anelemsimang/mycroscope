@@ -3,9 +3,11 @@ import { Text } from 'react-native';
 
 import { Button, Card, ErrorBanner, Field, Screen, styles } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
+import { webAppUrl } from '@/lib/authLink';
 import { supabase } from '@/lib/supabase';
 
-const resetUrl = process.env.EXPO_PUBLIC_PASSWORD_RESET_URL || undefined;
+const webUrl = webAppUrl();
+const resetUrl = webUrl ? `${webUrl}/auth/reset-password` : undefined;
 
 export default function ForgotPassword() {
   const [identifier, setIdentifier] = useState('');

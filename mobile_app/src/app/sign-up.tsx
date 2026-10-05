@@ -4,7 +4,10 @@ import { Text } from 'react-native';
 
 import { Button, Card, ErrorBanner, Field, Screen, ToggleRow, styles } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
+import { webAppUrl } from '@/lib/authLink';
 import { supabase } from '@/lib/supabase';
+
+const webUrl = webAppUrl();
 
 export default function SignUp() {
   const [orgName, setOrgName] = useState('');
@@ -28,7 +31,10 @@ export default function SignUp() {
       const { data, error: authError } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password,
-        options: { data: { signup_type: 'owner', organization_name: orgName.trim(), full_name: fullName.trim() } },
+        options: {
+          data: { signup_type: 'owner', organization_name: orgName.trim(), full_name: fullName.trim() },
+          emailRedirectTo: webUrl ? `${webUrl}/auth/confirm` : undefined,
+        },
       });
       if (authError) throw authError;
       if (!data.session) setSentTo(email.trim().toLowerCase());

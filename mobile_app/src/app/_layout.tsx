@@ -1,4 +1,5 @@
-import { Stack } from 'expo-router';
+import { authLinkRoute, initialAuthLink } from '@/lib/authLink';
+import { Stack, router, usePathname } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -32,8 +33,16 @@ export default function RootLayout() {
 
 function RootNavigator() {
   const { session, isLoading } = useSession();
+  const pathname = usePathname();
   useEffect(() => {
     if (!isLoading) SplashScreen.hide();
+  }, [isLoading]);
+  useEffect(() => {
+    if (isLoading) return;
+    const target = authLinkRoute(initialAuthLink());
+    if (target && !pathname.startsWith('/auth/')) router.replace(target);
+    // Only for the address the app was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
   if (isLoading) return null;
 
@@ -49,6 +58,8 @@ function RootNavigator() {
         <Stack.Screen name="sign-up" options={{ title: 'Organisation Registration' }} />
         <Stack.Screen name="forgot-password" options={{ title: 'Reset password' }} />
       </Stack.Protected>
+      <Stack.Screen name="auth/confirm" options={{ title: 'Confirm email', headerBackVisible: false }} />
+      <Stack.Screen name="auth/reset-password" options={{ title: 'Choose a new password', headerBackVisible: false }} />
     </Stack>
     </>
   );

@@ -15,7 +15,7 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 from config import (CREDENTIALS_FILE, DEFAULT_SETTINGS, LOCAL_DB_FILE, MAX_CLOCK_SKEW_SECONDS,
-                    SAMPLE_INTERVAL_SECONDS, SUPABASE_KEY, SUPABASE_URL, VERSION)
+                    SAMPLE_INTERVAL_SECONDS, SUPABASE_KEY, SUPABASE_URL, VERSION, WEB_APP_URL)
 from core.api import ApiError, AuthError, NetworkError, Session, SupabaseApi, to_server_time
 from core.credentials import CredentialStore
 from core.engine import Identity, SegmentEngine, TrackingSettings
@@ -113,7 +113,7 @@ class Agent:
     def request_password_reset(self, identifier: str) -> None:
         email = self.api.resolve_login_email(identifier.strip())
         if email:
-            self.api.request_password_reset(email)
+            self.api.request_password_reset(email, f"{WEB_APP_URL}/auth/reset-password" if WEB_APP_URL else None)
 
     def _load_profile(self) -> None:
         uid = self.api.session.user_id

@@ -1,9 +1,10 @@
 # Installs the Mycroscope agent for the current Windows user (no admin rights needed).
-#   powershell -ExecutionPolicy Bypass -File install.ps1 [-SupabaseUrl URL -SupabaseKey ANON_KEY]
+#   powershell -ExecutionPolicy Bypass -File install.ps1 [-SupabaseUrl URL -SupabaseKey ANON_KEY [-WebAppUrl URL]]
 # Without parameters it uses agent.env next to this script, or keeps an existing configuration.
 param(
     [string]$SupabaseUrl,
-    [string]$SupabaseKey
+    [string]$SupabaseKey,
+    [string]$WebAppUrl
 )
 $ErrorActionPreference = 'Stop'
 $source = Join-Path $PSScriptRoot 'Mycroscope'
@@ -22,7 +23,9 @@ if ($LASTEXITCODE -ge 8) { throw "Copy failed (robocopy $LASTEXITCODE)" }
 
 $utf8 = New-Object Text.UTF8Encoding $false
 if ($SupabaseUrl -and $SupabaseKey) {
-    [IO.File]::WriteAllText($envFile, "SUPABASE_URL=$SupabaseUrl`r`nSUPABASE_KEY=$SupabaseKey`r`n", $utf8)
+    $config = "SUPABASE_URL=$SupabaseUrl`r`nSUPABASE_KEY=$SupabaseKey`r`n"
+    if ($WebAppUrl) { $config += "WEB_APP_URL=$WebAppUrl`r`n" }
+    [IO.File]::WriteAllText($envFile, $config, $utf8)
 } elseif (Test-Path (Join-Path $PSScriptRoot 'agent.env')) {
     Copy-Item (Join-Path $PSScriptRoot 'agent.env') $envFile -Force
 } elseif (-not (Test-Path $envFile)) {

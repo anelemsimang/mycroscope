@@ -207,8 +207,9 @@ class SupabaseApi:
         if self._on_session_changed:
             self._on_session_changed(None)
 
-    def request_password_reset(self, email: str) -> None:
-        resp = self._send("POST", "/auth/v1/recover", auth=False, json={"email": email})
+    def request_password_reset(self, email: str, redirect_to: Optional[str] = None) -> None:
+        params = {"redirect_to": redirect_to} if redirect_to else None
+        resp = self._send("POST", "/auth/v1/recover", auth=False, params=params, json={"email": email})
         if resp.status_code >= 400:
             raise AuthError(_friendly_auth_error(resp))
 

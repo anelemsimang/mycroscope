@@ -24,6 +24,7 @@ load_dotenv(DATA_DIR / "agent.env", override=True)
 
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()
+WEB_APP_URL = (os.getenv("WEB_APP_URL") or "").strip().rstrip("/")
 
 LOCAL_DB_FILE = DATA_DIR / "agent.db"
 CREDENTIALS_FILE = DATA_DIR / "session.bin"
