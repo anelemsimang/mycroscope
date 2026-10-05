@@ -30,8 +30,13 @@ copy .env.example .env      # then fill in SUPABASE_URL and SUPABASE_KEY (anon/p
 - **Notice:** tracking only starts after the employee acknowledges the current monitoring notice. When the
   organisation changes settings, the new notice appears within about 5 minutes; anything it adds is not
   recorded until the employee acknowledges it, while anything it removes stops immediately.
-- **Tray and taskbar:** while tracking, closing the window minimises it; the tray icon stays. Signing out
+- **Tray and taskbar:** closing the window minimises it; the tray icon stays. Signing out (always allowed)
   stops tracking. Pausing (if the organisation allows it) is recorded.
+- **Sign-in reminder:** while nobody is signed in (or the notice is not accepted) and someone is using the PC,
+  the window comes back on top every 2 minutes. The PC is never locked. After 15 minutes of continuous use
+  (lock screen or 5 minutes without input starts the count again) managers get a "Used without signing in"
+  alert with the PC name and duration only. This works on PCs where someone has signed in before: at sign-in
+  the agent registers a random per-PC key, which is the only credential the report uses.
 - **Offline:** activity is queued in a local database and uploaded when the connection returns.
 - **Working hours:** if the organisation chooses "working hours only", nothing is recorded outside the
   schedule (the tray shows "Outside working hours"). If it also turns on "flag after-hours use", the agent

@@ -8,6 +8,7 @@ import ctypes
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from pathlib import Path
@@ -17,9 +18,11 @@ from typing import Any, Callable, Optional
 from PIL import Image, ImageDraw
 import pystray
 
-from config import APP_NAME, THEME_COLORS as C, VERSION
+from config import (APP_NAME, IN_USE_IDLE_SECONDS, REMINDER_INTERVAL_SECONDS, THEME_COLORS as C,
+                    UNATTENDED_ALERT_MINUTES, UNATTENDED_REPORT_SECONDS, VERSION)
 from core.agent import Agent
 from core.api import ApiError, AuthError, NetworkError
+from core.unattended import UnattendedWatch
 from utils.autostart import mark_stopped_by_user
 from utils.logger import get_logger
 
@@ -101,6 +104,10 @@ class AgentApp:
         self.tray: Optional[pystray.Icon] = None
         self._tray_color = None
         self._closed = False
+        self._watch = UnattendedWatch(REMINDER_INTERVAL_SECONDS, UNATTENDED_ALERT_MINUTES,
+                                      UNATTENDED_REPORT_SECONDS, IN_USE_IDLE_SECONDS)
+        self._watch.reset(time.monotonic())
+        self._on_top = False
 
     def _set_window_icon(self) -> None:
         # The .ico holds 16-256 px. Don't add iconphoto: on Windows it makes the taskbar fall back to python.exe's icon.
@@ -167,6 +174,34 @@ class AgentApp:
         self.root.lift()
         self.root.focus_force()
 
+    # ---- sign-in reminder ------------------------------------------------
+    def _watch_tick(self) -> None:
+        """While nothing is tracked and someone uses the PC: keep the window on top, then tell the managers."""
+        if self._closed:
+            return
+        try:
+            now = time.monotonic()
+            if self.agent.tracking:
+                self._watch.reset(now)
+                self._set_on_top(False)
+            else:
+                from core import monitor
+                decision = self._watch.observe(now, monitor.idle_seconds(), monitor.screen_locked())
+                if decision.remind:
+                    self._set_on_top(True)
+                    self.show_window()
+                if decision.report_minutes:
+                    threading.Thread(target=self.agent.report_unattended_use, args=(decision.report_minutes,),
+                                     daemon=True).start()
+        except Exception:
+            log.exception("Sign-in reminder check failed")
+        self.root.after(5000, self._watch_tick)
+
+    def _set_on_top(self, on_top: bool) -> None:
+        if on_top != self._on_top:
+            self._on_top = on_top
+            self.root.attributes("-topmost", on_top)
+
     # ---- start -----------------------------------------------------------
     def run(self) -> None:
         self.root.after(100, self._pump)
@@ -175,6 +210,7 @@ class AgentApp:
             self.root.iconify()
         self._show_message("Starting…")
         self._restore()
+        self.root.after(5000, self._watch_tick)
         try:
             self.root.mainloop()
         except KeyboardInterrupt:
@@ -561,11 +597,11 @@ class AgentApp:
 
     # ---- window / exit ---------------------------------------------------
     def _on_close(self) -> None:
+        self.root.iconify()
         if self.agent.tracking:
-            self.root.iconify()
             self._notify("Mycroscope is still tracking. It stays on the taskbar; sign out to stop.")
         else:
-            self._quit()
+            self._notify("Mycroscope will remind you to sign in every few minutes while you use this PC.")
 
     def _on_session_end(self) -> None:
         log.info("Windows session ending")

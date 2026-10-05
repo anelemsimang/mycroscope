@@ -140,6 +140,9 @@ the organisation. Companies already using Mycroscope get one from their customer
 the normal 14-day trial runs; it can be ended early or restarted. The customer sees "Free case study until ..."
 and every change appears in both audit logs. Needs `supabase/migrations/20261008090000_case_studies.sql`.
 
+The "Used without signing in" alert (a PC in use for 15 minutes with nobody signed in to the agent) needs
+`supabase/migrations/20261009090000_unattended_use.sql` and agent 2.1 or later.
+
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.
 

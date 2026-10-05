@@ -76,6 +76,10 @@ def _input_desktop_is_default() -> bool:
         user32.CloseDesktop(hdesk)
 
 
+def screen_locked() -> bool:
+    return not _input_desktop_is_default()
+
+
 @lru_cache(maxsize=256)
 def _friendly_app_name(exe_path: str, process_name: str) -> str:
     try:

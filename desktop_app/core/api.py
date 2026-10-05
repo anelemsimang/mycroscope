@@ -218,6 +218,12 @@ class SupabaseApi:
         resp = self._rest("POST", f"/rpc/{fn}", json=args or {})
         return resp.json() if resp.content else None
 
+    def rpc_anon(self, fn: str, args: Optional[dict[str, Any]] = None) -> Any:
+        """For the few functions open to the anon role; works while nobody is signed in."""
+        resp = self._send("POST", f"/rest/v1/rpc/{fn}", auth=False, json=args or {})
+        self._raise_for(resp)
+        return resp.json() if resp.content else None
+
     def select(self, table: str, params: dict[str, str]) -> list[dict[str, Any]]:
         return self._rest("GET", f"/{table}", params=params).json()
 

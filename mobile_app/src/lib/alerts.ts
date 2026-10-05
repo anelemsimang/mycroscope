@@ -20,6 +20,8 @@ export function describeAlert(a: Pick<IntegrityAlert, 'kind' | 'details'>): stri
       return `The PC's clock was ${Math.abs(n(d.offset_seconds))} seconds off; server time was used instead.`;
     case 'after_hours_use':
       return 'The PC was in use outside working hours (nothing about what it was used for is recorded).';
+    case 'unattended_use':
+      return `${d.hostname ? `The PC "${String(d.hostname)}"` : 'A PC'} was used for ${n(d.minutes)} minutes without Mycroscope tracking: nobody was signed in, or the monitoring notice was not accepted. It is listed under the last person who signed in on it; nothing about what it was used for is recorded.`;
     default:
       return a.kind.replace(/_/g, ' ');
   }
@@ -33,4 +35,5 @@ export const ALERT_TITLES: Record<string, string> = {
   input_anomaly: 'Possible mouse jiggler',
   clock_skew: 'Clock wrong',
   after_hours_use: 'After-hours use',
+  unattended_use: 'Used without signing in',
 };

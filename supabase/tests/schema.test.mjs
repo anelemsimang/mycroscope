@@ -695,6 +695,50 @@ test('anon cannot reach the new tables or functions', async () => {
   await rejects(asUser(ctx.empAuth, 'select * from platform_admin_invites'), /permission denied/);
 });
 
+test('a PC used while nobody is signed in alerts managers, using only the per-PC key', async () => {
+  const key = 'k'.repeat(43);
+  const report = async (minutes, k = key) =>
+    (await asAnon('select report_unattended_use($1, $2, $3) as ok', [ctx.deviceId, k, minutes])).rows[0].ok;
+  const events = () => db.query(
+    `select details from agent_events where device_id = $1 and event_type = 'unattended_use' order by received_at`,
+    [ctx.deviceId]);
+
+  assert.equal(await report(15), false, 'no key registered yet');
+  await rejects(asAnon('select set_device_report_key($1, $2)', [ctx.deviceId, key]), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, 'select set_device_report_key($1, $2)', [ctx.deviceId, key]), /Not allowed/);
+  await rejects(asUser(ctx.empAuth, 'select set_device_report_key($1, $2)', [ctx.deviceId, 'short']), /Invalid key/);
+  await asUser(ctx.empAuth, 'select set_device_report_key($1, $2)', [ctx.deviceId, key]);
+
+  const emailedSince = new Date(Date.now() - 60_000).toISOString();
+  const emailed = async () => (await asRole('service_role', null, () => db.query(
+    `select alerts from email_alert_batch($1) where recipient_email = 'owner@acme.co.za'`, [emailedSince]))).rows[0]?.alerts ?? 0;
+  const emailedBefore = await emailed();
+
+  assert.equal(await report(15, 'x'.repeat(43)), false, 'wrong key');
+  assert.equal(await report(10), false, 'under 15 minutes');
+  assert.equal(await report(15), true);
+  assert.equal(await report(21), true);
+  let rows = (await events()).rows;
+  assert.equal(rows.length, 1, 'one alert per episode');
+  assert.deepEqual(rows[0].details, { hostname: 'LAPTOP-01', minutes: 21 });
+
+  const alerts = await asUser(ctx.ownerAuth, `select severity, details from get_integrity_alerts(now() - interval '1 day')
+                                              where kind = 'unattended_use'`);
+  assert.equal(alerts.rows.length, 1);
+  assert.equal(alerts.rows[0].severity, 'medium');
+  assert.equal(await emailed(), emailedBefore + 1, 'emailed by arrival time even though the event is back-dated');
+
+  await db.query(`update device_report_keys set unattended_seen_at = now() - interval '20 minutes' where device_id = $1`,
+    [ctx.deviceId]);
+  await report(15);
+  assert.equal((await events()).rows.length, 2, 'a break of over 10 minutes starts a new episode');
+
+  await asUser(ctx.empAuth, 'select set_device_report_key($1, $2)', [ctx.deviceId, 'n'.repeat(43)]);
+  assert.equal(await report(15), false, 'signing in again replaces the key');
+  await rejects(asAnon('select * from device_report_keys'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, 'select * from device_report_keys'), /permission denied/);
+});
+
 test('deleting an employee removes their data and is audited', async () => {
   await rejects(asUser(ctx.ownerAuth, 'select delete_employee($1, $2)', [ctx.ownerId, 'x']), /owner account/);
   await asUser(ctx.ownerAuth, 'select delete_employee($1, $2)', [ctx.empId, 'Left the company']);

@@ -54,6 +54,12 @@ HTTP_TIMEOUT_SECONDS = 15
 MAX_CLOCK_SKEW_SECONDS = 120
 SYNCED_RETENTION_DAYS = 3          # how long uploaded rows stay in the local db
 
+# While nobody is signed in (or the notice is not accepted) and the PC is in use
+REMINDER_INTERVAL_SECONDS = 120    # bring the sign-in window back to the front
+UNATTENDED_ALERT_MINUTES = 15      # then tell the managers (PCs where someone has signed in before)
+UNATTENDED_REPORT_SECONDS = 120
+IN_USE_IDLE_SECONDS = 300          # no input for longer than this means nobody is at the PC
+
 # Defaults until the organisation's settings are fetched
 DEFAULT_SETTINGS = {
     "track_apps": True,

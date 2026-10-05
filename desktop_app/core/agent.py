@@ -6,6 +6,7 @@ UI is responsible for marshalling them onto its own thread.
 
 import json
 import platform
+import secrets
 import socket
 import threading
 import uuid
@@ -287,6 +288,29 @@ class Agent:
             "last_seen_at": to_server_time(self.clock.now()),
         }], on_conflict="id")
 
+    def _register_report_key(self, device_id: str) -> None:
+        """Give this PC a fresh key for reporting use while nobody is signed in (see report_unattended_use)."""
+        key = secrets.token_urlsafe(32)
+        try:
+            self.api.rpc("set_device_report_key", {"p_device": device_id, "p_key": key})
+        except (NetworkError, ApiError, AuthError) as exc:
+            log.info("Could not register the PC report key: %s", exc)
+            return
+        self.store.set("unattended:device", device_id)
+        self.store.set("unattended:key", key)
+
+    def report_unattended_use(self, minutes: int) -> None:
+        device_id, key = self.store.get("unattended:device"), self.store.get("unattended:key")
+        if not device_id or not key:
+            return
+        try:
+            accepted = self.api.rpc_anon("report_unattended_use",
+                                         {"p_device": device_id, "p_key": key, "p_minutes": minutes})
+        except (NetworkError, ApiError) as exc:
+            log.info("Could not report unattended use: %s", exc)
+            return
+        log.info("Reported %d minutes of use with nobody signed in (accepted=%s)", minutes, accepted)
+
     def _close_stale_sessions(self) -> None:
         for sess in self.store.open_sessions(self.profile.employee_id):
             end = self.store.last_segment_end(sess["id"]) or sess["started_at"]
@@ -314,6 +338,7 @@ class Agent:
             on_auth_lost=self._auth_lost,
             on_connectivity=lambda online: self.on_change("connectivity"),
             on_service=self._apply_service,
+            on_device_registered=self._register_report_key,
         )
         self.engine = SegmentEngine(self.store, self.identity, self.settings, self._engine_event)
         self.engine.start(now)

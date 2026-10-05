@@ -33,9 +33,11 @@ class SyncService:
                  on_policy: Callable[[dict[str, Any]], None],
                  on_auth_lost: Callable[[str], None],
                  on_connectivity: Callable[[bool], None],
-                 on_service: Optional[Callable[[Optional[dict[str, Any]]], None]] = None):
+                 on_service: Optional[Callable[[Optional[dict[str, Any]]], None]] = None,
+                 on_device_registered: Optional[Callable[[str], None]] = None):
         self.api = api
         self.on_service = on_service
+        self.on_device_registered = on_device_registered
         self.store = store
         self.identity = identity
         self.clock = clock
@@ -146,6 +148,11 @@ class SyncService:
             "last_seen_at": to_server_time(self.clock.now()),
         }], on_conflict="id")
         self._device_registered = True
+        if self.on_device_registered:
+            try:
+                self.on_device_registered(i.device_id)
+            except Exception:
+                log.exception("Device registration callback failed")
 
     def _push_sessions(self) -> None:
         for sess in self.store.pending_sessions(self.identity.employee_id):
