@@ -70,6 +70,7 @@ class AgentApp:
         self.status_widgets: dict[str, Any] = {}
         self.tray: Optional[pystray.Icon] = None
         self._tray_color = None
+        self._closed = False
 
     # ---- plumbing --------------------------------------------------------
     def post(self, fn: Callable[[], None]) -> None:
@@ -134,10 +135,36 @@ class AgentApp:
         self.root.after(100, self._pump)
         self._start_tray()
         if self.start_hidden:
-            self.root.withdraw()
+            self.root.iconify()
         self._show_message("Starting…")
         self._restore()
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        except KeyboardInterrupt:
+            log.warning("Interrupted (Ctrl+C); shutting down")
+        except BaseException:
+            log.critical("UI loop crashed; shutting down", exc_info=True)
+            raise
+        finally:
+            self._shutdown(user_requested=False)
+
+    def _shutdown(self, user_requested: bool) -> None:
+        """Close the tracking session and the tray icon exactly once, however the app ends."""
+        if self._closed:
+            return
+        self._closed = True
+        if user_requested:
+            mark_stopped_by_user()
+        try:
+            self.agent.shutdown()
+        except Exception:
+            log.exception("Shutdown problem")
+        finally:
+            if self.tray:
+                try:
+                    self.tray.stop()
+                except Exception:
+                    log.exception("Tray stop problem")
 
     def _restore(self) -> None:
         def on_ok(restored: bool):
@@ -308,7 +335,7 @@ class AgentApp:
         def on_ok(_):
             self.show_status()
             if self.start_hidden:
-                self.root.withdraw()
+                self.root.iconify()
                 self.start_hidden = False
         self.run_bg(self.agent.start_tracking, on_ok)
 
@@ -487,8 +514,8 @@ class AgentApp:
     # ---- window / exit ---------------------------------------------------
     def _on_close(self) -> None:
         if self.agent.tracking:
-            self.root.withdraw()
-            self._notify("Mycroscope is still tracking. Use the tray icon to open it or sign out.")
+            self.root.iconify()
+            self._notify("Mycroscope is still tracking. It stays on the taskbar; sign out to stop.")
         else:
             self._quit()
 
@@ -497,10 +524,5 @@ class AgentApp:
         self._quit()
 
     def _quit(self) -> None:
-        mark_stopped_by_user()
-        try:
-            self.agent.shutdown()
-        finally:
-            if self.tray:
-                self.tray.stop()
-            self.root.destroy()
+        self._shutdown(user_requested=True)
+        self.root.destroy()

@@ -94,4 +94,9 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    code = main(sys.argv[1:])
+    # A leftover library thread (e.g. the tray) must never keep a windowless agent alive.
+    import logging
+    import os
+    logging.shutdown()
+    os._exit(code)
