@@ -7,7 +7,7 @@ import { useSession } from '@/lib/session';
 function BackToList() {
   return (
     <Pressable hitSlop={8} style={{ paddingRight: 12 }} accessibilityRole="button" accessibilityLabel="Back to employees"
-      onPress={() => (router.canDismiss() ? router.dismissAll() : router.replace('/'))}>
+      onPress={() => router.replace('/')}>
       <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>‹ Employees</Text>
     </Pressable>
   );
@@ -30,8 +30,12 @@ export default function AppLayout() {
     <Stack screenOptions={{ headerTintColor: colors.primary, contentStyle: { backgroundColor: colors.background } }}>
       <Stack.Protected guard={isManager}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="employee/[id]" options={{ title: 'Activity', headerLeft: () => <BackToList /> }} />
-        <Stack.Screen name="manage/[id]" options={{ title: 'Manage employee', headerLeft: () => <BackToList /> }} />
+        <Stack.Screen name="employee/[id]" options={({ navigation }) => ({
+          title: 'Activity', ...(navigation.canGoBack() ? {} : { headerLeft: () => <BackToList /> }),
+        })} />
+        <Stack.Screen name="manage/[id]" options={({ navigation }) => ({
+          title: 'Manage employee', ...(navigation.canGoBack() ? {} : { headerLeft: () => <BackToList /> }),
+        })} />
         <Stack.Screen name="add-employee" options={{ title: 'Add employee', presentation: 'modal' }} />
       </Stack.Protected>
       <Stack.Protected guard={!isManager}>
