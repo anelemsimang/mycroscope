@@ -142,6 +142,8 @@ and every change appears in both audit logs. Needs `supabase/migrations/20261008
 
 The "Used without signing in" alert (a PC in use for 15 minutes with nobody signed in to the agent) needs
 `supabase/migrations/20261009090000_unattended_use.sql` and agent 2.1 or later.
+`20261010090000_notice_sign_in_reminders.sql` adds the reminder and this alert to the monitoring notice and
+publishes a new notice version for every organisation (employees are asked to acknowledge it; tracking continues).
 
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.

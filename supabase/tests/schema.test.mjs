@@ -98,6 +98,7 @@ test('owner sign-up creates organisation, settings, owner and first notice', asy
   assert.equal(policy.rows[0].version, 1);
   assert.match(policy.rows[0].notice_text, /Acme Logistics/);
   assert.match(policy.rows[0].notice_text, /Full web addresses/);
+  assert.match(policy.rows[0].notice_text, /SIGN-IN REMINDERS\n.*every 2 minutes.*15 minutes in a row/s);
   assert.equal(policy.rows[0].acknowledged, false);
 });
 
@@ -737,6 +738,19 @@ test('a PC used while nobody is signed in alerts managers, using only the per-PC
   assert.equal(await report(15), false, 'signing in again replaces the key');
   await rejects(asAnon('select * from device_report_keys'), /permission denied/);
   await rejects(asUser(ctx.ownerAuth, 'select * from device_report_keys'), /permission denied/);
+});
+
+test('the sign-in reminder migration republishes every notice without changing settings', async () => {
+  const before = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot from monitoring_policies order by version desc limit 1')).rows[0];
+  await db.exec(readFileSync(path.join(migrationsDir, '20261010090000_notice_sign_in_reminders.sql'), 'utf8'));
+  const after = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot, notice_text from monitoring_policies order by version desc limit 1')).rows[0];
+  assert.equal(after.version, before.version + 1);
+  const { updated_at: _a, ...afterSettings } = after.settings_snapshot;
+  const { updated_at: _b, ...beforeSettings } = before.settings_snapshot;
+  assert.deepEqual(afterSettings, beforeSettings);
+  assert.match(after.notice_text, /SIGN-IN REMINDERS/);
+  const status = (await asUser(ctx.empAuth, 'select acknowledged from get_my_policy_status()')).rows[0];
+  assert.equal(status.acknowledged, false, 'employees are asked to acknowledge the new version');
 });
 
 test('deleting an employee removes their data and is audited', async () => {
