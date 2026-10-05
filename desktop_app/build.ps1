@@ -16,8 +16,6 @@ $py = '.\venv\Scripts\python.exe'
 if ($LASTEXITCODE) { throw 'pip install failed' }
 
 New-Item -ItemType Directory -Force build | Out-Null
-& $py -c "from ui.app_ui import _tray_image; from config import THEME_COLORS as C; _tray_image(C['success']).save('build/mycroscope.ico', sizes=[(16,16),(32,32),(48,48),(64,64)])"
-if ($LASTEXITCODE) { throw 'icon generation failed' }
 
 $utf8 = New-Object Text.UTF8Encoding $false
 $version = (& $py -c "from config import VERSION; print(VERSION)").Trim()
@@ -38,15 +36,20 @@ VSVersionInfo(
 "@
 [IO.File]::WriteAllText((Join-Path $PSScriptRoot 'build\version.txt'), $versionInfo, $utf8)
 
+# PyInstaller logs warnings to stderr; Windows PowerShell turns those into terminating errors under 'Stop'.
+$ErrorActionPreference = 'Continue'
 & $py -m PyInstaller --noconfirm --clean --windowed --name Mycroscope `
-    --icon build\mycroscope.ico `
+    --icon assets\mycroscope.ico `
+    --add-data "assets;assets" `
     --version-file build\version.txt `
     --hidden-import pystray._win32 `
     --hidden-import win32timezone `
     --collect-all uiautomation `
     --collect-data tzdata `
     main.py
-if ($LASTEXITCODE) { throw 'PyInstaller failed' }
+$pyInstallerExit = $LASTEXITCODE
+$ErrorActionPreference = 'Stop'
+if ($pyInstallerExit) { throw 'PyInstaller failed' }
 
 $installers = 'install.ps1', 'uninstall.ps1', 'install-machine.ps1', 'uninstall-machine.ps1', 'update.ps1', 'README.txt'
 Copy-Item ($installers | ForEach-Object { Join-Path installer $_ }) -Destination dist\

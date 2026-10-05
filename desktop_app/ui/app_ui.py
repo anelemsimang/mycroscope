@@ -4,10 +4,13 @@ Background threads never touch tkinter directly; they post callables to
 `self._queue`, which the Tk thread drains every 100 ms.
 """
 
+import ctypes
 import queue
+import sys
 import threading
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
+from pathlib import Path
 from tkinter.scrolledtext import ScrolledText
 from typing import Any, Callable, Optional
 
@@ -46,21 +49,46 @@ def _error_text(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
 
 
+def _asset(name: str) -> Path:
+    # PyInstaller unpacks bundled data under sys._MEIPASS; from source it sits next to the code.
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / "assets" / name
+
+
+def _logo(size: int) -> Image.Image:
+    try:
+        return Image.open(_asset("mycroscope.png")).convert("RGBA").resize((size, size), Image.LANCZOS)
+    except OSError:
+        log.warning("Logo image missing; using a plain icon")
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        ImageDraw.Draw(img).rounded_rectangle((0, 0, size - 1, size - 1), radius=size // 5, fill=C["primary"])
+        return img
+
+
 def _tray_image(color: str) -> Image.Image:
-    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    d.ellipse((2, 2, 62, 62), fill=C["primary"])
-    d.ellipse((38, 38, 62, 62), fill=color, outline="white", width=3)
-    d.text((17, 14), "M", fill="white", font_size=30)
+    """The logo with a status dot in the corner (the dot colour follows the tracking state)."""
+    img = _logo(64)
+    ImageDraw.Draw(img).ellipse((40, 40, 63, 63), fill=color, outline="white", width=3)
     return img
+
+
+def _set_app_id() -> None:
+    # Gives the window its own taskbar entry and icon instead of python.exe's when run from source.
+    if sys.platform == "win32":
+        try:
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Mycroscope.Agent")
+        except (AttributeError, OSError):
+            pass
 
 
 class AgentApp:
     def __init__(self, start_hidden: bool = False):
         self.start_hidden = start_hidden
         self._queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
+        _set_app_id()
         self.root = tk.Tk()
         self.root.title(APP_NAME)
+        self._set_window_icon()
         self.root.geometry("460x640")
         self.root.minsize(420, 560)
         self.root.configure(bg=C["background"])
@@ -73,6 +101,19 @@ class AgentApp:
         self.tray: Optional[pystray.Icon] = None
         self._tray_color = None
         self._closed = False
+
+    def _set_window_icon(self) -> None:
+        try:
+            self.root.iconbitmap(default=str(_asset("mycroscope.ico")))
+        except tk.TclError:
+            log.warning("Window icon missing")
+        # iconbitmap only carries small sizes; iconphoto supplies sharp large ones (Alt+Tab, high DPI taskbar).
+        try:
+            from PIL import ImageTk
+            self._icon_photos = [ImageTk.PhotoImage(_logo(s)) for s in (256, 64, 32)]
+            self.root.iconphoto(True, *self._icon_photos)
+        except Exception:  # noqa: BLE001 - cosmetic only
+            log.warning("Large window icon unavailable", exc_info=True)
 
     # ---- plumbing --------------------------------------------------------
     def post(self, fn: Callable[[], None]) -> None:
