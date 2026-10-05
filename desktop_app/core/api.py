@@ -111,6 +111,10 @@ class SupabaseApi:
         except requests.RequestException as exc:
             raise NetworkError(str(exc)) from exc
         self._record_date(resp, sent, time.time())
+        if resp.status_code == 500 and path.startswith("/auth/") and \
+                ("Database error" in resp.text or '"P0001"' in resp.text):
+            # Our sign-up trigger rejected the details; GoTrue reports that as a 500.
+            return resp
         if resp.status_code >= 500 or resp.status_code in (408, 429):
             raise NetworkError(f"Server returned {resp.status_code}")
         return resp

@@ -18,8 +18,9 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Packaged installs keep config in the data dir; dev runs use desktop_app/.env.
-load_dotenv(BASE_DIR / ".env")
-load_dotenv(DATA_DIR / "agent.env")
+# The agent's own files win over machine-wide environment variables.
+load_dotenv(BASE_DIR / ".env", override=True)
+load_dotenv(DATA_DIR / "agent.env", override=True)
 
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()

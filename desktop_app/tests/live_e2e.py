@@ -26,12 +26,12 @@ from core.agent import Agent  # noqa: E402
 from core.api import AuthError, SupabaseApi  # noqa: E402
 from utils.logger import setup_logging  # noqa: E402
 
-PASS = "\u2713"
+PASS = "ok"
 failures: list[str] = []
 
 
 def check(cond: bool, label: str) -> None:
-    print(f"  {PASS if cond else 'X'} {label}")
+    print(f"  {PASS if cond else 'FAIL'} {label}")
     if not cond:
         failures.append(label)
 
@@ -101,6 +101,7 @@ def main() -> int:
 
     print("4. Tracking (20s)")
     agent.start_tracking()
+    tracking_started = time.monotonic()
     time.sleep(20)
     agent.sync.poke()
     check(wait_for(lambda: agent.pending_uploads() <= 1, 30), "segments uploaded")
@@ -159,14 +160,15 @@ def main() -> int:
 
     print("9. Sign out")
     agent.sign_out()
+    tracked_wall = time.monotonic() - tracking_started
     status = owner.select("agent_status", {"employee_id": f"eq.{emp_id}", "select": "state"})
     check(status and status[0]["state"] == "logged_out", "status shows logged out")
     sess = owner.select("agent_sessions", {"employee_id": f"eq.{emp_id}", "select": "ended_at,end_reason"})
     check(all(s["ended_at"] and s["end_reason"] == "logout" for s in sess), "session closed with reason logout")
     total_server = sum(r["duration_seconds"] for r in owner.select(
         "activity_segments", {"employee_id": f"eq.{emp_id}", "select": "duration_seconds"}))
-    print(f"   server total {total_server}s across all states")
-    check(total_server >= 80, "server time covers the run")
+    print(f"   server total {total_server}s across all states; wall time tracked {tracked_wall:.1f}s")
+    check(abs(total_server - tracked_wall) <= 3, "server time matches wall-clock time (no gaps, no double counting)")
 
     print("10. Clean-up")
     owner.rpc("delete_employee", {"p_employee": emp_id, "p_reason": "automated end-to-end test"})
