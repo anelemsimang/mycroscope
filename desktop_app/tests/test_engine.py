@@ -212,6 +212,80 @@ class StoreTests(unittest.TestCase):
                          datetime(2026, 1, 2, 1, 4, 5, 678900, tzinfo=timezone.utc))
 
 
+class SettingsTests(unittest.TestCase):
+    def test_narrowed_keeps_only_what_both_allow(self):
+        new = TrackingSettings(True, True, True, True, 600, False)
+        old = TrackingSettings(True, False, True, False, 300, True)
+        self.assertEqual(new.narrowed_to(old), TrackingSettings(True, False, True, False, 600, True))
+
+    def test_narrowed_without_acknowledged_records_nothing_optional(self):
+        n = TrackingSettings(True, True, True, True, 300, False).narrowed_to(None)
+        self.assertEqual((n.track_apps, n.track_window_titles, n.track_web_domains, n.track_full_urls, n.allow_pause),
+                         (False, False, False, False, True))
+
+
+class AgentPolicyTests(unittest.TestCase):
+    """Widened settings must not take effect until the new notice is acknowledged."""
+
+    def setUp(self):
+        from core.agent import Agent, Profile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.agent = Agent.__new__(Agent)
+        self.agent.store = LocalStore(Path(self.tmp.name) / "t.db")
+        self.agent.profile = Profile("emp", "org", "N", "C1", "employee", "O", "Africa/Johannesburg")
+        self.calls = []
+
+        agent = self
+
+        class FakeApi:
+            def select(self, table, params):
+                agent.calls.append(table)
+                return agent.server_rows
+
+        self.agent.api = FakeApi()
+        self.server_rows = []
+
+    def tearDown(self):
+        self.agent.store.close()
+        self.tmp.cleanup()
+
+    @staticmethod
+    def policy(acknowledged, **settings):
+        base = {"track_apps": True, "track_window_titles": False, "track_web_domains": True,
+                "track_full_urls": False, "idle_threshold_seconds": 300, "allow_pause": True}
+        return {"policy_id": "p", "acknowledged": acknowledged, "settings": {**base, **settings}}
+
+    def test_widening_waits_for_acknowledgement(self):
+        a = self.agent
+        self.assertFalse(a._effective_settings(self.policy(True)).track_window_titles)
+        wider = self.policy(False, track_window_titles=True, track_full_urls=True, allow_pause=False)
+        pending = a._effective_settings(wider)
+        self.assertFalse(pending.track_window_titles)
+        self.assertFalse(pending.track_full_urls)
+        self.assertTrue(pending.allow_pause)
+        self.assertEqual(self.calls, [], "cached acknowledged settings should avoid a server call")
+        accepted = a._effective_settings({**wider, "acknowledged": True})
+        self.assertTrue(accepted.track_window_titles)
+        self.assertFalse(accepted.allow_pause)
+
+    def test_narrowing_applies_immediately(self):
+        a = self.agent
+        a._effective_settings(self.policy(True))
+        self.assertFalse(a._effective_settings(self.policy(False, track_web_domains=False)).track_web_domains)
+
+    def test_uses_server_record_when_nothing_cached(self):
+        self.server_rows = [{"monitoring_policies": {"settings_snapshot": {"track_apps": True, "track_window_titles": True,
+                                                                          "track_web_domains": False, "track_full_urls": False}}}]
+        s = self.agent._effective_settings(self.policy(False, track_window_titles=True))
+        self.assertEqual(self.calls, ["consents"])
+        self.assertTrue(s.track_window_titles)
+        self.assertFalse(s.track_web_domains)
+
+    def test_never_acknowledged_records_nothing_optional(self):
+        s = self.agent._effective_settings(self.policy(False))
+        self.assertFalse(s.track_apps or s.track_window_titles or s.track_web_domains or s.track_full_urls)
+
+
 class UrlTests(unittest.TestCase):
     def test_normalise(self):
         self.assertEqual(normalise_url("github.com/a/b"), ("https://github.com/a/b", "github.com"))

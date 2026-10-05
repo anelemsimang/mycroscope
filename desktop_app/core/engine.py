@@ -47,6 +47,21 @@ class TrackingSettings:
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d and d[k] is not None}
         return cls(**known)
 
+    def narrowed_to(self, acknowledged: Optional["TrackingSettings"]) -> "TrackingSettings":
+        """Records nothing the employee has not acknowledged; used while a new notice awaits acknowledgement.
+
+        With no known acknowledged settings, nothing optional is recorded.
+        """
+        a = acknowledged or TrackingSettings(False, False, False, False, self.idle_threshold_seconds, True)
+        return TrackingSettings(
+            track_apps=self.track_apps and a.track_apps,
+            track_window_titles=self.track_window_titles and a.track_window_titles,
+            track_web_domains=self.track_web_domains and a.track_web_domains,
+            track_full_urls=self.track_full_urls and a.track_full_urls,
+            idle_threshold_seconds=self.idle_threshold_seconds,
+            allow_pause=self.allow_pause or a.allow_pause,
+        )
+
 
 @dataclass
 class LiveState:

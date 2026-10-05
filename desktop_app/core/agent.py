@@ -88,7 +88,7 @@ class Agent:
             self.profile = Profile(**cached)
             self.policy = self._cached("policy")
             if self.policy:
-                self.settings = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(self.policy.get("settings") or {})})
+                self.settings = self._effective_settings(self.policy)
             return True
 
     def _cached(self, key: str) -> Optional[dict]:
@@ -138,6 +138,8 @@ class Agent:
     def _discard_session(self) -> None:
         self.api.sign_out()
         self.creds.clear()
+        if self.profile:
+            self._cache(f"ack_settings:{self.profile.employee_id}", None)
         self._cache("profile", None)
         self._cache("policy", None)
 
@@ -164,7 +166,7 @@ class Agent:
         self.policy = policy
         self._cache("policy", policy)
         if policy:
-            self.settings = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(policy.get("settings") or {})})
+            self.settings = self._effective_settings(policy)
             with self._engine_lock:
                 if self.engine:
                     self.engine.update_settings(self.settings)
@@ -174,6 +176,40 @@ class Agent:
             (previous or {}).get("acknowledged") != (policy or {}).get("acknowledged")
         if changed and previous is not None:
             self.on_change("policy")
+
+    def _effective_settings(self, policy: dict[str, Any]) -> TrackingSettings:
+        """The policy's settings, narrowed to what was last acknowledged until this version is acknowledged."""
+        published = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(policy.get("settings") or {})})
+        if not self.profile:
+            return published
+        key = f"ack_settings:{self.profile.employee_id}"
+        if policy.get("acknowledged"):
+            self._cache(key, policy.get("settings") or {})
+            return published
+        acknowledged = self._cached(key)
+        if acknowledged is None:
+            acknowledged = self._fetch_acknowledged_settings()
+            if acknowledged is not None:
+                self._cache(key, acknowledged)
+        if acknowledged is None:
+            return published.narrowed_to(None)
+        return published.narrowed_to(TrackingSettings.from_dict({**DEFAULT_SETTINGS, **acknowledged}))
+
+    def _fetch_acknowledged_settings(self) -> Optional[dict[str, Any]]:
+        """Settings of the notice this employee most recently acknowledged (on any device)."""
+        try:
+            rows = self.api.select("consents", {
+                "employee_id": f"eq.{self.profile.employee_id}",
+                "select": "acknowledged_at,monitoring_policies(settings_snapshot)",
+                "order": "acknowledged_at.desc",
+                "limit": "1",
+            })
+        except (NetworkError, ApiError, AuthError) as exc:
+            log.info("Could not load previously acknowledged settings: %s", exc)
+            return None
+        if not rows or not rows[0].get("monitoring_policies"):
+            return None
+        return rows[0]["monitoring_policies"].get("settings_snapshot") or {}
 
     @property
     def needs_acknowledgement(self) -> bool:
