@@ -1,89 +1,76 @@
 import os
+import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+APP_NAME = "Mycroscope"
+VERSION = "2.0.0"
 
-# Base paths
-BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
-LOGS_DIR = BASE_DIR / "logs"
-CACHE_DIR = BASE_DIR / "cache"
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).parent
 
-# Create directories if they don't exist
-DATA_DIR.mkdir(exist_ok=True)
-LOGS_DIR.mkdir(exist_ok=True)
-CACHE_DIR.mkdir(exist_ok=True)
+DATA_DIR = Path(os.getenv("LOCALAPPDATA") or Path.home()) / APP_NAME
+LOGS_DIR = DATA_DIR / "logs"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Supabase configuration (set in .env — see .env.example)
-SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip()
+# Packaged installs keep config in the data dir; dev runs use desktop_app/.env.
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(DATA_DIR / "agent.env")
+
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()
 
-# Application settings
-APP_NAME = "Mycroscope"
-VERSION = "1.0.0"
-COMPANY_NAME = "Mycroscope Corp"
+LOCAL_DB_FILE = DATA_DIR / "agent.db"
+CREDENTIALS_FILE = DATA_DIR / "session.bin"
+LOG_FILE = LOGS_DIR / "agent.log"
+LOG_LEVEL = os.getenv("MYCROSCOPE_LOG_LEVEL", "INFO").upper()
 
-# Tracking settings
-IDLE_THRESHOLD = 300  # 5 minutes in seconds
-ACTIVITY_CHECK_INTERVAL = 1  # 1 second
-SYNC_INTERVAL = 30  # 30 seconds
-OFFLINE_SYNC_INTERVAL = 300  # 5 minutes when offline
+# Sampling and segmenting
+SAMPLE_INTERVAL_SECONDS = 1.0
+MAX_SEGMENT_SECONDS = 300          # long segments are split so a crash loses little
+TITLE_DEBOUNCE_SECONDS = 10        # title-only changes merge into short segments
+SLEEP_GAP_SECONDS = 30             # wall-clock gap between samples treated as sleep
+PERSIST_OPEN_SEGMENT_SECONDS = 5
 
-# Security settings
-ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "mycroscope-secret-key-2024-32chars")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+# Server communication
+UPLOAD_INTERVAL_SECONDS = 15
+STATUS_INTERVAL_SECONDS = 20
+SETTINGS_REFRESH_SECONDS = 300
+UPLOAD_BATCH_SIZE = 200
+MAX_BACKOFF_SECONDS = 300
+HTTP_TIMEOUT_SECONDS = 15
+MAX_CLOCK_SKEW_SECONDS = 120
+SYNCED_RETENTION_DAYS = 3          # how long uploaded rows stay in the local db
 
-# UI settings
-WINDOW_WIDTH = 400
-WINDOW_HEIGHT = 600
-THEME_COLORS = {
-    "primary": "#1e3a8a",  # Navy
-    "background": "#ffffff",  # White
-    "alert": "#dc2626",  # Red
-    "success": "#059669",  # Green
-    "warning": "#d97706",  # Orange
-    "text": "#1f2937",  # Dark gray
-    "text_secondary": "#6b7280",  # Light gray
+# Defaults until the organisation's settings are fetched
+DEFAULT_SETTINGS = {
+    "track_apps": True,
+    "track_window_titles": True,
+    "track_web_domains": True,
+    "track_full_urls": True,
+    "idle_threshold_seconds": 300,
+    "allow_pause": True,
 }
 
-# Logging settings
-LOG_LEVEL = "INFO"
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-LOG_FILE = LOGS_DIR / "mycroscope.log"
+BROWSER_PROCESSES = {
+    "chrome.exe": "Google Chrome",
+    "msedge.exe": "Microsoft Edge",
+    "firefox.exe": "Firefox",
+    "brave.exe": "Brave",
+    "opera.exe": "Opera",
+    "vivaldi.exe": "Vivaldi",
+}
 
-# Database settings
-LOCAL_DB_FILE = DATA_DIR / "local_data.db"
-OFFLINE_QUEUE_FILE = DATA_DIR / "offline_queue.json"
-
-# Auto-launch settings
-STARTUP_REGISTRY_KEY = "Mycroscope"
-STARTUP_REGISTRY_VALUE = str(BASE_DIR / "main.py")
-
-# Activity tracking settings
-TRACK_MOUSE_MOVEMENTS = True
-TRACK_KEYBOARD_ACTIVITY = True
-TRACK_APPLICATIONS = True
-TRACK_WEB_ACTIVITY = True
-TRACK_SCROLLING = True
-TRACK_PROJECT_SWITCHING = True
-
-# Privacy settings
-BLACKLISTED_APPS = [
-    "taskmgr.exe",
-    "regedit.exe",
-    "cmd.exe",
-    "powershell.exe"
-]
-
-BLACKLISTED_URLS = [
-    "chrome://",
-    "about:",
-    "file://",
-    "data:"
-]
-
-# Report settings
-REPORT_RETENTION_DAYS = 90
-MAX_LOG_SIZE_MB = 100 
+THEME_COLORS = {
+    "primary": "#1e3a8a",
+    "background": "#ffffff",
+    "alert": "#dc2626",
+    "success": "#059669",
+    "warning": "#d97706",
+    "text": "#1f2937",
+    "text_secondary": "#6b7280",
+}
