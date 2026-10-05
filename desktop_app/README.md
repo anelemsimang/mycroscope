@@ -33,12 +33,20 @@ copy .env.example .env      # then fill in SUPABASE_URL and SUPABASE_KEY (anon/p
 - **Tray and taskbar:** while tracking, closing the window minimises it; the tray icon stays. Signing out
   stops tracking. Pausing (if the organisation allows it) is recorded.
 - **Offline:** activity is queued in a local database and uploaded when the connection returns.
-- **Data and logs:** `%LOCALAPPDATA%\Mycroscope` (`agent.db`, `logs\agent.log`).
+- **Working hours:** if the organisation chooses "working hours only", nothing is recorded outside the
+  schedule (the tray shows "Outside working hours"). If it also turns on "flag after-hours use", the agent
+  only notes, at most once an hour, that the PC was in use after hours: no apps, titles or websites.
+- **Subscription:** when the organisation's subscription is not active, the agent stops recording and says so.
+- **Integrity checks** (if the organisation turns them on; all listed in the notice): gaps where the agent
+  was not running while the PC was awake during working hours, virtual machines, remote desktop sessions,
+  and machine-like input rhythms (mouse jigglers). These raise alerts for managers; they never block work.
+- **Data and logs:** `%LOCALAPPDATA%\Mycroscope` (`agent.db`, `logs\agent.log`). Sign-in tokens are encrypted
+  with Windows DPAPI for the signed-in user.
 
 ## Tests
 
 ```powershell
-.\venv\Scripts\python.exe -m unittest tests.test_engine
+.\venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py"
 ```
 
 `tests/live_e2e.py` is an optional end-to-end test against a real Supabase project. It creates a throwaway
@@ -47,5 +55,11 @@ copy .env.example .env      # then fill in SUPABASE_URL and SUPABASE_KEY (anon/p
 
 ## Build and install on employee PCs
 
-See `installer/README.txt` (`build.ps1` produces a self-contained `Mycroscope.exe` plus install/uninstall scripts;
-installation needs no admin rights and starts the agent at sign-in).
+See `installer/README.txt`. `build.ps1` produces a self-contained `Mycroscope.exe`, install/uninstall scripts and
+an update package. Company PCs should use the all-users install (`install-machine.ps1`, administrator): the
+agent then starts for every user, restarts if closed, cannot be removed by standard users, and updates itself
+from signed builds. Personal PCs can use the per-user install (`install.ps1`, no admin rights).
+
+Code signing: set `SIGN_CERT_THUMBPRINT` (certificate in the Windows store) or `SIGN_PFX_PATH` and
+`SIGN_PFX_PASSWORD` before running `build.ps1`. Unsigned builds work but trigger SmartScreen warnings and
+cannot be delivered by the auto-updater.

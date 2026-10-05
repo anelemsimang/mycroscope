@@ -38,9 +38,13 @@ npx expo start              # press w for the browser (http://localhost:8081), o
 - The organisation owner registers from the sign-in screen and confirms their email.
 - Owners and managers add employees (**Register Employee**); each new employee gets an employee code and a
   one-time activation code to enter in the desktop agent.
-- **Settings -> Compliance** (owners and managers): what is recorded, retention, Information Officer, notice text,
-  who has acknowledged the notice, notice history and the audit log.
-- Employees who sign in see only their own activity.
+- **Settings -> Compliance** (owners and managers): what is recorded, working hours, integrity checks, retention,
+  Information Officer, notice text, who has acknowledged the notice, notice history, the audit log and
+  employees' privacy requests.
+- **Settings -> Organisation:** alerts, productivity categories, teams (owner), subscription and billing,
+  and time-limited support access for Mycroscope (owner).
+- Owners can require two-factor login for all managers; new organisations get a 14-day trial.
+- Employees who sign in see only their own activity and can send privacy requests.
 
 Checks: `npm run typecheck`, `npm test`.
 
@@ -66,5 +70,85 @@ See [`desktop_app/README.md`](desktop_app/README.md) to run it from source, and
 ```powershell
 cd supabase/tests
 npm install
-npm test        # runs the migrations in an in-process Postgres and checks security, reporting and retention rules
+npm test        # runs the migrations in an in-process Postgres and checks security, reporting and retention rules,
+                # then unit-tests the payment and email logic used by the edge functions
 ```
+
+## 6. Payments (Paystack)
+
+Billing is prepaid: the owner picks seats and 1 or 12 months on **Settings -> Subscription & billing**, pays on
+Paystack's page, and the paid period is extended when Paystack confirms the payment. Paying early adds to the end.
+When a subscription lapses (after a 14-day grace period), everything stays viewable and exportable but the
+desktop agent stops recording.
+
+1. Create a Paystack business account and complete its verification (needed for live payments).
+2. Install the [Supabase CLI](https://supabase.com/docs/guides/cli), then from the repository root:
+
+   ```powershell
+   supabase login
+   supabase link --project-ref YOUR_PROJECT_REF
+   supabase secrets set PAYSTACK_SECRET_KEY=sk_live_... PRICE_PER_SEAT_CENTS=9900 ANNUAL_DISCOUNT_PERCENT=15 APP_URL=https://app.example.co.za
+   supabase functions deploy paystack-checkout
+   supabase functions deploy paystack-webhook --no-verify-jwt
+   ```
+
+   `PRICE_PER_SEAT_CENTS` is the monthly price per seat in cents (9900 = R99.00). A per-customer price can be set
+   in the `subscriptions.price_per_seat_cents` column. `ANNUAL_DISCOUNT_PERCENT` (optional, at most 50) applies
+   to 12-month payments.
+3. In Paystack **Settings -> API Keys & Webhooks**, set the webhook URL to
+   `https://YOUR_PROJECT_REF.supabase.co/functions/v1/paystack-webhook`.
+4. Test with the `sk_test_...` key and Paystack's test cards first, then switch to the live key.
+
+Without these secrets the billing page explains that online payment is not set up; EFT payments can be recorded
+by an operator (section 8).
+
+## 7. Manager emails (Resend)
+
+Managers get a Monday-morning summary and, at most hourly, a notice when new integrity alerts appear. Emails
+contain counts only (no names or activity details). Each manager can turn them off under Account.
+
+1. Create a [Resend](https://resend.com) account, add and verify a sending domain (DNS records), create an API key.
+2. Deploy:
+
+   ```powershell
+   supabase secrets set RESEND_API_KEY=re_... EMAIL_FROM="Mycroscope <alerts@mail.example.co.za>" CRON_SECRET=<long random string>
+   supabase functions deploy notify-managers --no-verify-jwt
+   ```
+
+3. Edit the placeholders in `supabase/setup/schedule_emails.sql` (function URL and the same `CRON_SECRET`) and
+   run it once in the SQL editor. It enables `pg_cron`/`pg_net` and stores both values in Supabase Vault.
+
+Also recommended: under **Authentication -> Emails -> SMTP Settings**, send Supabase's own sign-up and
+password-reset emails through Resend too (Supabase's built-in sender is heavily rate-limited).
+
+## 8. Operator console (for Mycroscope staff)
+
+Operators see customers, subscriptions and system health, but **no activity data**. Customers can grant support
+a time-limited technical view (agent versions and status); every operator action is recorded in an operator
+audit log and, where it affects a customer, in that customer's audit log.
+
+1. In the SQL editor: `insert into public.platform_admin_invites (email) values ('you@yourcompany.co.za');`
+2. Create the account: either Supabase **Authentication -> Users -> Add user** with that email, or the app's
+   registration form (the organisation fields are ignored for invited emails; no organisation is created).
+   Sign in; operator accounts must set up two-factor login before the console opens.
+3. Use the console to extend trials, record EFT payments (set the status to Active, the seats and the paid-until
+   date, with a note), suspend or cancel customers, and delete a cancelled customer's data on request.
+
+Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
+their MFA factor, after confirming their identity out of band.
+
+## 9. Launch checklist
+
+- [ ] All migrations applied in order; `select jobname from cron.job;` shows `mycroscope-nightly` (and the two
+      email jobs once section 7 is done).
+- [ ] Authentication: Site URL and `https://<domain>/auth/*` redirect set; "Confirm email" on; custom SMTP set.
+- [ ] Web app deployed (section 4) with HTTPS on your own domain.
+- [ ] Paystack live keys set, webhook URL configured, one real low-value payment tested end to end.
+- [ ] Resend domain verified; a test digest received (`kind: "digest"` request, see `schedule_emails.sql`).
+- [ ] Desktop agent built with a code-signing certificate; update host serving `manifest.json`; installed on a
+      test PC with `install-machine.ps1` and checked: starts for a standard user, restarts when killed, updates.
+- [ ] Operator account created with two-factor login.
+- [ ] Your own POPIA documents ready: privacy policy, operator agreement (customers are responsible parties,
+      Mycroscope is their operator), Information Officer registration, breach-notification procedure.
+- [ ] Supabase on a paid plan with point-in-time recovery or daily backups, and a region close to customers.
+- [ ] GitHub Actions CI green on `main`.

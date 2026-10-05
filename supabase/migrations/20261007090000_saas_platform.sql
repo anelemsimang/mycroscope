@@ -208,7 +208,7 @@ $$;
 
 create or replace function public.get_my_service_status()
 returns table (level text, status text, plan text, trial_ends_at timestamptz, current_period_end timestamptz,
-               grace_until timestamptz, seats integer, seats_used integer)
+               grace_until timestamptz, seats integer, seats_used integer, require_mfa boolean)
 language sql
 stable
 security definer
@@ -218,9 +218,57 @@ as $$
          case when s.status in ('active', 'past_due') and s.current_period_end is not null
               then s.current_period_end + make_interval(days => s.grace_days) end,
          s.seats,
-         (select count(*)::integer from public.employees e where e.organization_id = s.organization_id and e.is_active)
+         (select count(*)::integer from public.employees e where e.organization_id = s.organization_id and e.is_active),
+         coalesce((select os.require_mfa from public.organization_settings os where os.organization_id = s.organization_id), false)
   from public.subscriptions s
   where s.organization_id = public.my_organization_id();
+$$;
+
+-- Payments confirmed by the Paystack webhook (written with the service role only).
+create table public.payments (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations (id) on delete cascade,
+  provider text not null default 'paystack',
+  reference text not null unique,
+  amount_cents integer not null check (amount_cents >= 0),
+  currency text not null,
+  seats integer not null check (seats > 0),
+  months integer not null check (months > 0),
+  paid_at timestamptz not null default now(),
+  raw jsonb not null default '{}'::jsonb
+);
+create index payments_org_idx on public.payments (organization_id, paid_at desc);
+
+-- Applies a verified payment exactly once (Paystack retries webhooks). Returns false if already applied.
+create or replace function public.apply_payment(
+  p_org uuid, p_reference text, p_amount_cents integer, p_currency text, p_seats integer, p_months integer,
+  p_customer_code text, p_raw jsonb)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.payments (organization_id, reference, amount_cents, currency, seats, months, raw)
+  values (p_org, p_reference, p_amount_cents, p_currency, p_seats, p_months, coalesce(p_raw, '{}'::jsonb))
+  on conflict (reference) do nothing;
+  if not found then
+    return false;
+  end if;
+  update public.subscriptions
+  set status = case when status = 'suspended' then status else 'active' end,
+      plan = case when plan = 'trial' then 'standard' else plan end,
+      seats = p_seats,
+      current_period_end = greatest(coalesce(current_period_end, now()), now()) + make_interval(months => p_months),
+      paystack_customer_code = coalesce(p_customer_code, paystack_customer_code),
+      cancelled_at = null
+  where organization_id = p_org;
+  insert into public.audit_log (organization_id, action, target_type, target_id, details)
+  values (p_org, 'payment_received', 'organization', p_org::text,
+          jsonb_build_object('reference', p_reference, 'amount_cents', p_amount_cents, 'currency', p_currency,
+                             'seats', p_seats, 'months', p_months));
+  return true;
+end;
 $$;
 
 -- Backstop: the agent stops recording when the service is not 'full'; the database refuses new activity too.
@@ -1419,10 +1467,11 @@ begin
   if org_id is null or not public.is_manager_of(org_id) then
     raise exception 'Not allowed';
   end if;
-  if p ? 'require_mfa' and public.my_role() <> 'owner' then
+  select * into cur from public.organization_settings where organization_id = org_id;
+  if (p ->> 'require_mfa')::boolean is distinct from cur.require_mfa and p ? 'require_mfa'
+     and public.my_role() <> 'owner' then
     raise exception 'Only the owner can change the two-factor requirement';
   end if;
-  select * into cur from public.organization_settings where organization_id = org_id;
   web_domains := coalesce((p ->> 'track_web_domains')::boolean, cur.track_web_domains);
   full_urls := coalesce((p ->> 'track_full_urls')::boolean, cur.track_full_urls);
   if full_urls and not web_domains then
@@ -1507,6 +1556,170 @@ end;
 $$;
 
 -- -----------------------------------------------------------------------------
+-- Email notifications. Sent by the notify-managers edge function (service role). Emails carry counts only:
+-- no names or activity details, because email is not protected by the app's sign-in and two-factor checks.
+-- -----------------------------------------------------------------------------
+create table public.notification_preferences (
+  employee_id uuid primary key references public.employees (id) on delete cascade,
+  weekly_digest boolean not null default true,
+  alert_emails boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+create table public.email_runs (
+  kind text primary key check (kind in ('digest', 'alerts')),
+  last_run_at timestamptz not null
+);
+
+create or replace function public.get_my_notification_preferences()
+returns table (weekly_digest boolean, alert_emails boolean)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select coalesce(p.weekly_digest, true), coalesce(p.alert_emails, true)
+  from public.employees e
+  left join public.notification_preferences p on p.employee_id = e.id
+  where e.id = public.my_employee_id();
+$$;
+
+create or replace function public.set_my_notification_preferences(p_weekly_digest boolean, p_alert_emails boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  me uuid := public.my_employee_id();
+begin
+  if me is null then
+    raise exception 'Not signed in';
+  end if;
+  insert into public.notification_preferences (employee_id, weekly_digest, alert_emails)
+  values (me, coalesce(p_weekly_digest, true), coalesce(p_alert_emails, true))
+  on conflict (employee_id) do update
+  set weekly_digest = excluded.weekly_digest, alert_emails = excluded.alert_emails, updated_at = now();
+end;
+$$;
+
+-- Same rule as can_view_employee, for a given viewer instead of the signed-in user.
+create or replace function public.employees_visible_to(p_viewer uuid)
+returns setof uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select t.id
+  from public.employees me
+  join public.employees t on t.organization_id = me.organization_id
+  where me.id = p_viewer and me.is_active
+    and (me.role = 'owner'
+         or (me.role = 'manager'
+             and (not exists (select 1 from public.team_managers tm where tm.employee_id = me.id)
+                  or exists (select 1 from public.team_managers tm where tm.employee_id = me.id and tm.team_id = t.team_id))));
+$$;
+
+-- Records this run and returns when the previous one happened (or now - p_default on the first run).
+create or replace function public.claim_email_window(p_kind text, p_default interval)
+returns timestamptz
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  prev timestamptz;
+begin
+  select last_run_at into prev from public.email_runs where kind = p_kind for update;
+  insert into public.email_runs (kind, last_run_at) values (p_kind, now())
+  on conflict (kind) do update set last_run_at = now();
+  return greatest(coalesce(prev, now() - p_default), now() - interval '8 days');
+end;
+$$;
+
+create or replace function public.email_digest_batch()
+returns table (recipient_email text, recipient_name text, role text, organization_name text,
+               week_start date, week_end date, people integer, activated integer, active_seconds bigint,
+               idle_seconds bigint, person_days integer, integrity_alerts integer, high_alerts integer,
+               open_requests integer)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with recipients as (
+    select m.id, m.email, m.name, m.role, o.id as org_id, o.name as org_name,
+           (now() at time zone o.timezone)::date - 7 as wk_start,
+           (now() at time zone o.timezone)::date - 1 as wk_end
+    from public.employees m
+    join public.organizations o on o.id = m.organization_id
+    join public.subscriptions s on s.organization_id = o.id
+    left join public.notification_preferences np on np.employee_id = m.id
+    where m.is_active and m.role in ('owner', 'manager') and m.auth_user_id is not null
+      and coalesce(np.weekly_digest, true)
+      and public.subscription_level(s) = 'full'
+  ),
+  scoped as (
+    select r.*, array(select public.employees_visible_to(r.id)) as visible from recipients r
+  )
+  select s.email, s.name, s.role, s.org_name, s.wk_start, s.wk_end,
+         (select count(*)::integer from public.employees t where t.id = any(s.visible) and t.is_active),
+         (select count(*)::integer from public.employees t
+          where t.id = any(s.visible) and t.is_active and t.auth_user_id is not null),
+         (select coalesce(sum(d.active_seconds), 0)::bigint from public.daily_summaries d
+          where d.employee_id = any(s.visible) and d.day between s.wk_start and s.wk_end),
+         (select coalesce(sum(d.idle_seconds), 0)::bigint from public.daily_summaries d
+          where d.employee_id = any(s.visible) and d.day between s.wk_start and s.wk_end),
+         (select count(*)::integer from public.daily_summaries d
+          where d.employee_id = any(s.visible) and d.day between s.wk_start and s.wk_end and d.active_seconds > 0),
+         (select count(*)::integer from public.agent_events ev
+          where ev.organization_id = s.org_id and ev.employee_id = any(s.visible)
+            and ev.occurred_at >= now() - interval '7 days'
+            and ev.event_type in ('agent_gap', 'vm_detected', 'remote_session', 'input_anomaly')),
+         (select count(*)::integer from public.agent_events ev
+          where ev.organization_id = s.org_id and ev.employee_id = any(s.visible)
+            and ev.occurred_at >= now() - interval '7 days'
+            and ev.event_type = 'agent_gap' and coalesce((ev.details ->> 'minutes')::numeric, 0) >= 10),
+         (select count(*)::integer from public.data_requests dr
+          where dr.organization_id = s.org_id and dr.employee_id = any(s.visible)
+            and dr.status in ('open', 'in_progress'))
+  from scoped s;
+$$;
+
+create or replace function public.email_alert_batch(p_since timestamptz)
+returns table (recipient_email text, recipient_name text, organization_name text, alerts integer, high_alerts integer)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with recipients as (
+    select m.id, m.email, m.name, o.id as org_id, o.name as org_name,
+           array(select public.employees_visible_to(m.id)) as visible
+    from public.employees m
+    join public.organizations o on o.id = m.organization_id
+    join public.subscriptions s on s.organization_id = o.id
+    left join public.notification_preferences np on np.employee_id = m.id
+    where m.is_active and m.role in ('owner', 'manager') and m.auth_user_id is not null
+      and coalesce(np.alert_emails, true)
+      and public.subscription_level(s) = 'full'
+  ),
+  counted as (
+    select r.email, r.name, r.org_name,
+           count(ev.*)::integer as alerts,
+           count(ev.*) filter (where ev.event_type = 'agent_gap'
+                                 and coalesce((ev.details ->> 'minutes')::numeric, 0) >= 10)::integer as high_alerts
+    from recipients r
+    join public.agent_events ev on ev.organization_id = r.org_id and ev.employee_id = any(r.visible)
+    where ev.occurred_at >= p_since
+      and ev.event_type in ('agent_gap', 'vm_detected', 'remote_session', 'input_anomaly')
+    group by r.email, r.name, r.org_name
+  )
+  select * from counted where alerts > 0;
+$$;
+
+-- -----------------------------------------------------------------------------
 -- Row level security for new tables
 -- -----------------------------------------------------------------------------
 alter table public.teams enable row level security;
@@ -1519,7 +1732,12 @@ alter table public.support_access_grants enable row level security;
 alter table public.app_categories enable row level security;
 alter table public.data_requests enable row level security;
 alter table public.maintenance_runs enable row level security;
+alter table public.payments enable row level security;
+alter table public.notification_preferences enable row level security;
+alter table public.email_runs enable row level security;
 
+create policy payments_select on public.payments for select to authenticated
+  using (public.is_manager_of(organization_id));
 create policy teams_select on public.teams for select to authenticated
   using (organization_id = public.my_organization_id());
 create policy team_managers_select on public.team_managers for select to authenticated
@@ -1540,11 +1758,12 @@ create policy data_requests_select on public.data_requests for select to authent
 -- -----------------------------------------------------------------------------
 revoke all on public.teams, public.team_managers, public.subscriptions, public.platform_admins,
   public.platform_admin_invites, public.operator_audit_log, public.support_access_grants,
-  public.app_categories, public.data_requests, public.maintenance_runs from anon;
+  public.app_categories, public.data_requests, public.maintenance_runs, public.payments from anon;
 revoke insert, update, delete on public.teams, public.team_managers, public.subscriptions, public.platform_admins,
   public.platform_admin_invites, public.operator_audit_log, public.support_access_grants,
-  public.app_categories, public.data_requests, public.maintenance_runs from authenticated;
-revoke all on public.platform_admin_invites, public.operator_audit_log, public.maintenance_runs from authenticated;
+  public.app_categories, public.data_requests, public.maintenance_runs, public.payments from authenticated;
+revoke all on public.platform_admin_invites, public.operator_audit_log, public.maintenance_runs,
+  public.notification_preferences, public.email_runs from anon, authenticated;
 
 revoke execute on all functions in schema public from public, anon;
 grant execute on all functions in schema public to authenticated;
@@ -1562,8 +1781,19 @@ revoke execute on function
   public.write_operator_audit(text, uuid, jsonb),
   public.org_service_level(uuid),
   public.subscription_level(public.subscriptions),
-  public.is_work_time(uuid, timestamptz)
+  public.is_work_time(uuid, timestamptz),
+  public.apply_payment(uuid, text, integer, text, integer, integer, text, jsonb),
+  public.employees_visible_to(uuid),
+  public.claim_email_window(text, interval),
+  public.email_digest_batch(),
+  public.email_alert_batch(timestamptz)
 from authenticated;
 grant execute on function public.resolve_login_email(text) to anon;
+grant execute on function
+  public.apply_payment(uuid, text, integer, text, integer, integer, text, jsonb),
+  public.claim_email_window(text, interval),
+  public.email_digest_batch(),
+  public.email_alert_batch(timestamptz)
+to service_role;
 
 notify pgrst, 'reload schema';

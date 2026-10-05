@@ -4,7 +4,8 @@
   "description": "PGlite tests for the Supabase migration",
   "main": "index.js",
   "scripts": {
-    "test": "node --test schema.test.mjs"
+    "test": "node --test schema.test.mjs && npm run test:functions",
+    "test:functions": "node --test --experimental-strip-types ../functions/_shared/shared.test.ts"
   },
   "keywords": [],
   "author": "",

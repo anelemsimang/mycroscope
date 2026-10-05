@@ -581,6 +581,68 @@ test('operators can delete only cancelled organisations, with the name typed', a
   assert.equal(user.rows[0].n, 0);
 });
 
+test('payments apply once and extend the paid period', async () => {
+  await db.query(`update subscriptions set status = 'trialing', plan = 'trial', current_period_end = null where organization_id = $1`, [ctx.orgId]);
+  const pay = (ref) => asRole('service_role', null, () => db.query(
+    `select apply_payment($1, $2, 297000, 'ZAR', 30, 1, 'CUS_x', '{}') as applied`, [ctx.orgId, ref]));
+  assert.equal((await pay('ref-1')).rows[0].applied, true);
+  assert.equal((await pay('ref-1')).rows[0].applied, false, 'a retried webhook must not extend twice');
+  const sub = await db.query('select status, plan, seats, current_period_end from subscriptions where organization_id = $1', [ctx.orgId]);
+  assert.equal(sub.rows[0].status, 'active');
+  assert.equal(sub.rows[0].plan, 'standard');
+  assert.equal(sub.rows[0].seats, 30);
+  const days = (new Date(sub.rows[0].current_period_end) - Date.now()) / 86_400_000;
+  assert.ok(days > 27 && days < 32);
+  await pay('ref-2');
+  const twice = await db.query('select current_period_end from subscriptions where organization_id = $1', [ctx.orgId]);
+  assert.ok((new Date(twice.rows[0].current_period_end) - Date.now()) / 86_400_000 > 56, 'paying early adds to the end');
+
+  await rejects(asUser(ctx.ownerAuth, `select apply_payment($1, 'ref-3', 1, 'ZAR', 1, 1, null, '{}')`, [ctx.orgId]), /permission denied/);
+  const seen = await asUser(ctx.ownerAuth, 'select count(*)::int as n from payments');
+  assert.equal(seen.rows[0].n, 2);
+  const empSeen = await asUser(ctx.empAuth, 'select count(*)::int as n from payments');
+  assert.equal(empSeen.rows[0].n, 0);
+  const audit = await asUser(ctx.ownerAuth, `select count(*)::int as n from audit_log where action = 'payment_received'`);
+  assert.equal(audit.rows[0].n, 2);
+});
+
+test('email batches follow team scope and preferences, and only the service role can run them', async () => {
+  const svc = (sql, params = []) => asRole('service_role', null, () => db.query(sql, params));
+  const first = (await svc(`select claim_email_window('alerts', interval '1 day') as since`)).rows[0].since;
+  assert.ok(Date.now() - new Date(first) > 23 * 3_600_000, 'the first run looks back by the default interval');
+  const second = (await svc(`select claim_email_window('alerts', interval '1 day') as since`)).rows[0].since;
+  assert.ok(Date.now() - new Date(second) < 60_000, 'later runs start where the previous one ended');
+
+  const alerts = async () => Object.fromEntries((await svc('select * from email_alert_batch($1)', [first])).rows
+    .map((r) => [r.recipient_email.toLowerCase(), r]));
+  let rows = await alerts();
+  assert.equal(rows['owner@acme.co.za'].high_alerts, 1);
+  assert.equal(rows['mary@acme.co.za'].alerts, 1, 'the employee is in the team Mary manages');
+  assert.equal(rows['boss@other.co.za'], undefined, 'other organisations are not told');
+
+  await asUser(ctx.mgrAuth, 'select set_my_notification_preferences(true, false)');
+  const prefs = await asUser(ctx.mgrAuth, 'select * from get_my_notification_preferences()');
+  assert.deepEqual(prefs.rows, [{ weekly_digest: true, alert_emails: false }]);
+  rows = await alerts();
+  assert.equal(rows['mary@acme.co.za'], undefined, 'alert emails can be turned off');
+
+  const digest = await svc('select * from email_digest_batch()');
+  const owner = digest.rows.find((r) => r.recipient_email === 'owner@acme.co.za');
+  assert.ok(owner.people >= 3 && owner.integrity_alerts >= 1);
+  assert.ok(digest.rows.some((r) => r.recipient_email === 'mary@acme.co.za'));
+
+  await rejects(asUser(ctx.ownerAuth, 'select * from email_digest_batch()'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, `select claim_email_window('alerts', interval '1 day')`), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, 'select * from notification_preferences'), /permission denied/);
+});
+
+test('managers can save all settings without touching the two-factor rule', async () => {
+  const status = await asUser(ctx.mgrAuth, 'select require_mfa from get_my_service_status()');
+  assert.equal(status.rows[0].require_mfa, false);
+  await asUser(ctx.mgrAuth, COMPLIANCE_SQL, settingsArgs({ require_mfa: false, allow_pause: false }, 'Lerato Officer', 'privacy@acme.co.za'));
+  await rejects(asUser(ctx.mgrAuth, COMPLIANCE_SQL, settingsArgs({ require_mfa: true })), /Only the owner/);
+});
+
 test('nightly maintenance records its runs', async () => {
   await db.query('select run_nightly_maintenance()');
   const runs = await db.query('select count(*)::int as n from maintenance_runs');
