@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import {
   Button, Card, Empty, ErrorBanner, Loading, Screen, Segmented, StackedBar, colors, stateColor, styles,
 } from '@/components/ui';
 import { api, errorMessage, type DailyTotal, type EmployeeRow } from '@/lib/api';
+import { notify } from '@/lib/dialog';
 import { sharePdf, shareCsv } from '@/lib/export';
 import {
   PERIOD_LABELS, formatDay, formatDuration, htmlEscape, percent, periodRange, toCsv, todayIn, type PeriodKey,
@@ -69,7 +70,7 @@ export default function Reports() {
         ['date', 'employee', 'employee_code', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'active_hours'],
         rows));
     } catch (e) {
-      Alert.alert('Export failed', errorMessage(e));
+      notify('Export failed', errorMessage(e));
     } finally {
       setExporting(null);
     }
@@ -90,7 +91,7 @@ export default function Reports() {
       await logExport('pdf');
       await sharePdf(title, body);
     } catch (e) {
-      Alert.alert('Export failed', errorMessage(e));
+      notify('Export failed', errorMessage(e));
     } finally {
       setExporting(null);
     }

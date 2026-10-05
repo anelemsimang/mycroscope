@@ -42,7 +42,10 @@ export function Screen({ children, refreshing, onRefresh, padded = true }: Props
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={padded ? { padding: 16, paddingBottom: 40, gap: 12 } : undefined}
+      contentContainerStyle={[
+        { width: '100%', maxWidth: 820, alignSelf: 'center' },
+        padded ? { padding: 16, paddingBottom: 40, gap: 12 } : null,
+      ]}
       keyboardShouldPersistTaps="handled"
       refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> : undefined}>
       {children}

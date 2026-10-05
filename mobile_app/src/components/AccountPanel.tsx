@@ -1,9 +1,10 @@
 import Constants from 'expo-constants';
 import { useState } from 'react';
-import { Alert, Text } from 'react-native';
+import { Text } from 'react-native';
 
 import { Button, Card, ErrorBanner, Field, Screen, styles } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
+import { confirmAction, notify } from '@/lib/dialog';
 import { useProfile, useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 
@@ -27,7 +28,7 @@ export function AccountPanel() {
       if (e) throw e;
       setPassword('');
       setConfirm('');
-      Alert.alert('Password changed');
+      notify('Password changed');
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -48,11 +49,9 @@ export function AccountPanel() {
         <Field label="Confirm new password" value={confirm} onChangeText={setConfirm} secureTextEntry />
         <Button title="Change password" variant="secondary" onPress={changePassword} loading={busy} disabled={!password} />
       </Card>
-      <Button title="Sign out" variant="danger" onPress={() =>
-        Alert.alert('Sign out?', undefined, [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Sign out', style: 'destructive', onPress: signOut },
-        ])} />
+      <Button title="Sign out" variant="danger" onPress={async () => {
+        if (await confirmAction('Sign out?', undefined, 'Sign out')) signOut();
+      }} />
       <Text style={[styles.hint, { textAlign: 'center' }]}>Mycroscope mobile v{Constants.expoConfig?.version ?? '?'}</Text>
     </Screen>
   );

@@ -1,12 +1,13 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Alert, Text } from 'react-native';
+import { Text } from 'react-native';
 
 import { ActivationCard } from '@/components/ActivationCard';
 import {
   Button, Card, ErrorBanner, Field, Loading, Screen, Segmented, ToggleRow, colors, styles,
 } from '@/components/ui';
 import { api, errorMessage, type ActivationResult, type Role } from '@/lib/api';
+import { confirmAction } from '@/lib/dialog';
 import { formatDateTime } from '@/lib/format';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -60,19 +61,14 @@ export default function ManageEmployee() {
     }), reload);
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteReason.trim()) return setError('Enter a reason for deleting (kept in the audit log).');
-    Alert.alert(
+    const ok = await confirmAction(
       `Delete ${emp!.name}?`,
       'This permanently deletes the employee and ALL of their recorded activity. It cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete', style: 'destructive',
-          onPress: () => run('delete', () => api.deleteEmployee(emp!.id, deleteReason.trim()), () => router.dismissTo('/employees')),
-        },
-      ],
+      'Delete',
     );
+    if (ok) run('delete', () => api.deleteEmployee(emp!.id, deleteReason.trim()), () => router.dismissTo('/employees'));
   }
 
   return (

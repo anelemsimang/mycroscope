@@ -1,7 +1,8 @@
-import { Share, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { Button, Card, colors, styles } from '@/components/ui';
 import type { ActivationResult } from '@/lib/api';
+import { shareText } from '@/lib/dialog';
 import { formatDateTime } from '@/lib/format';
 
 export function activationMessage(name: string, org: string, a: ActivationResult, timezone: string): string {
@@ -32,7 +33,7 @@ export function ActivationCard({ name, org, result, timezone }: {
         </Text>
         <Text style={styles.hint}>Expires {formatDateTime(result.expires_at, timezone)}</Text>
       </View>
-      <Button title="Share instructions" onPress={() => Share.share({ message: activationMessage(name, org, result, timezone) })} />
+      <Button title="Share instructions" onPress={() => shareText(activationMessage(name, org, result, timezone))} />
     </Card>
   );
 }

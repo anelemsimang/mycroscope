@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import {
   BarRow, Button, Card, Empty, ErrorBanner, Loading, Screen, StackedBar, Stat, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
 import { api, errorMessage, type TimelineRow } from '@/lib/api';
+import { notify } from '@/lib/dialog';
 import { shareCsv } from '@/lib/export';
 import { addDays, formatDay, formatDuration, formatTime, toCsv, todayIn, type Ymd } from '@/lib/format';
 import { useAsync } from '@/lib/useAsync';
@@ -88,7 +89,7 @@ export function EmployeeActivity({ employeeId, employeeName, timezone, isSelf, h
       if (!isSelf) await api.logAccess(employeeId, 'exported_data', { day, format: 'csv' });
       await shareCsv(`mycroscope_${employeeName}_${day}`, csv);
     } catch (e) {
-      Alert.alert('Export failed', errorMessage(e));
+      notify('Export failed', errorMessage(e));
     } finally {
       setExporting(false);
     }
