@@ -606,6 +606,44 @@ test('payments apply once and extend the paid period', async () => {
   assert.equal(audit.rows[0].n, 2);
 });
 
+test('case studies: free for the agreed months, then the 14-day trial', async () => {
+  const op = (sql, params = []) => asUser2fa(ctx.opAuth, sql, params);
+  const days = (iso) => (new Date(iso) - Date.now()) / 86_400_000;
+  await rejects(asUser2fa(ctx.ownerAuth, `select op_invite_case_study('pilot@study.co.za', 12, 'Pilot')`), /Not allowed/);
+  await rejects(op(`select op_invite_case_study('owner@acme.co.za', 12, 'Pilot')`), /already registered/);
+  await rejects(op(`select op_invite_case_study('pilot@study.co.za', 30, 'Pilot')`), /between 1 and 24/);
+  await rejects(op(`select op_invite_case_study('pilot@study.co.za', 12, ' ')`), /note/);
+  await op(`select op_invite_case_study(' Pilot@Study.co.za ', 12, '2027 case study')`);
+  assert.equal((await op('select count(*)::int as n from op_case_study_invites()')).rows[0].n, 1);
+
+  const pilotAuth = await signUp('pilot@study.co.za', {
+    signup_type: 'owner', organization_name: 'Pilot Study Co', full_name: 'Pat Pilot' });
+  const status = (await asUser(pilotAuth, 'select * from get_my_service_status()')).rows[0];
+  assert.equal(status.status, 'trialing');
+  assert.equal(status.level, 'full');
+  assert.ok(days(status.case_study_until) > 360 && days(status.case_study_until) < 370);
+  assert.equal(Math.round((new Date(status.trial_ends_at) - new Date(status.case_study_until)) / 86_400_000), 14,
+    'the normal 14-day trial follows the case study');
+  assert.equal((await op('select count(*)::int as n from op_case_study_invites()')).rows[0].n, 0, 'the invite is used up');
+  const pilotOrg = (await asUser(pilotAuth, 'select organization_id from employees')).rows[0].organization_id;
+  const seen = await op('select case_study_until from op_organizations() where organization_id = $1', [pilotOrg]);
+  assert.ok(seen.rows[0].case_study_until);
+
+  const ended = (await op(`select * from op_set_case_study($1, 0, 'Pilot finished early')`, [pilotOrg])).rows[0];
+  assert.ok(days(ended.trial_ends_at) > 13 && days(ended.trial_ends_at) < 15);
+  await rejects(op(`select op_set_case_study($1, 0, 'again')`, [pilotOrg]), /No case study/);
+  const restarted = (await op(`select * from op_set_case_study($1, 6, 'Extended')`, [pilotOrg])).rows[0];
+  assert.ok(days(restarted.case_study_until) > 175);
+  await rejects(op(`select op_set_case_study($1, 12, 'x')`, [ctx.orgId]), /paying customer/);
+
+  const audit = await op(`select action from op_operator_audit(50) where action like 'case_study%'`);
+  assert.ok(audit.rows.length >= 4);
+  const customerAudit = await asUser(pilotAuth, `select count(*)::int as n from audit_log where action like 'case_study%'`);
+  assert.equal(customerAudit.rows[0].n, 3, 'the customer can see when the provider changed their case study');
+  await rejects(asUser(pilotAuth, 'select * from case_study_invites'), /permission denied/);
+  await rejects(asUser(pilotAuth, `select start_case_study($1, 24)`, [pilotOrg]), /permission denied/);
+});
+
 test('email batches follow team scope and preferences, and only the service role can run them', async () => {
   const svc = (sql, params = []) => asRole('service_role', null, () => db.query(sql, params));
   const first = (await svc(`select claim_email_window('alerts', interval '1 day') as since`)).rows[0].since;

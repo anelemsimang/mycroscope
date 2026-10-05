@@ -134,6 +134,12 @@ audit log and, where it affects a customer, in that customer's audit log.
 3. Use the console to extend trials, record EFT payments (set the status to Active, the seats and the paid-until
    date, with a note), suspend or cancel customers, and delete a cancelled customer's data on request.
 
+**Case studies** (free periods for selected companies): **Operator Console -> Case studies**. Invite the owner's
+email before they sign up (3, 6, 12 or 24 months), and the free period starts automatically when they register
+the organisation. Companies already using Mycroscope get one from their customer page. When the free period ends,
+the normal 14-day trial runs; it can be ended early or restarted. The customer sees "Free case study until ..."
+and every change appears in both audit logs. Needs `supabase/migrations/20261008090000_case_studies.sql`.
+
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.
 

@@ -3,16 +3,17 @@ import { useMemo, useState } from 'react';
 import { Text } from 'react-native';
 
 import { Button, Card, Empty, ErrorBanner, Field, LinkRow, Loading, Screen, Segmented, StatGrid, styles } from '@/components/ui';
-import { operatorApi } from '@/lib/api';
+import { inCaseStudy, operatorApi } from '@/lib/api';
 import { confirmAction } from '@/lib/dialog';
 import { formatDateTime, formatRelative } from '@/lib/format';
 import { needsAttention, statusLine } from '@/lib/operator';
 import { useSession } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
-type Filter = 'all' | 'trialing' | 'active' | 'attention' | 'cancelled';
+type Filter = 'all' | 'case_study' | 'trialing' | 'active' | 'attention' | 'cancelled';
 const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All' }, { value: 'trialing', label: 'Trials' }, { value: 'active', label: 'Paying' },
+  { value: 'all', label: 'All' }, { value: 'case_study', label: 'Case studies' }, { value: 'trialing', label: 'Trials' },
+  { value: 'active', label: 'Paying' },
   { value: 'attention', label: 'Needs attention' }, { value: 'cancelled', label: 'Cancelled' },
 ];
 
@@ -28,7 +29,8 @@ export default function OperatorHome() {
   const orgs = useMemo(() => (data?.orgs ?? []).filter((o) => {
     const q = query.trim().toLowerCase();
     if (q && !`${o.name} ${o.owner_email ?? ''} ${o.owner_name ?? ''}`.toLowerCase().includes(q)) return false;
-    if (filter === 'trialing') return o.status === 'trialing';
+    if (filter === 'case_study') return inCaseStudy(o);
+    if (filter === 'trialing') return o.status === 'trialing' && !inCaseStudy(o);
     if (filter === 'active') return o.status === 'active';
     if (filter === 'cancelled') return o.status === 'cancelled';
     if (filter === 'attention') return needsAttention(o);
@@ -72,6 +74,8 @@ export default function OperatorHome() {
         ))}
       </Card>
       <Card>
+        <LinkRow title="Case studies" subtitle="Free periods for selected companies, including ones not signed up yet"
+          onPress={() => router.push('/operator/case-studies')} />
         <LinkRow title="Operator audit log" subtitle="Everything operators have done" onPress={() => router.push('/operator/audit')} />
         <Text style={styles.hint}>
           Operators cannot see customers' activity data. Support views need the customer's time-limited permission and

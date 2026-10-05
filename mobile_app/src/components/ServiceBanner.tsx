@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 
 import { colors, styles } from '@/components/ui';
-import type { ServiceStatus } from '@/lib/api';
+import { inCaseStudy, type ServiceStatus } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 
 const DAY = 86_400_000;
@@ -16,6 +16,13 @@ export function serviceMessage(s: ServiceStatus | null, timezone: string, now = 
       : s.status === 'cancelled' ? 'Your subscription is cancelled'
       : 'Your subscription has expired';
     return { text: `${why}. Data stays viewable, but nothing new is recorded and no employees can be added.`, tone: 'danger' };
+  }
+  if (inCaseStudy(s, now) && s.case_study_until) {
+    const days = Math.ceil((Date.parse(s.case_study_until) - now) / DAY);
+    const end = formatDate(s.case_study_until, timezone);
+    return days <= 30
+      ? { text: `Your free case study ends on ${end} (${days} day${days === 1 ? '' : 's'}). A 14-day trial follows, then a subscription is needed.`, tone: 'warning' }
+      : { text: `Free case study until ${end}. Thank you for taking part.`, tone: 'info' };
   }
   if (s.status === 'trialing' && s.trial_ends_at) {
     const days = Math.max(0, Math.ceil((Date.parse(s.trial_ends_at) - now) / DAY));

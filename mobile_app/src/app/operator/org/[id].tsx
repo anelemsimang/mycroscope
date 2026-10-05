@@ -5,12 +5,11 @@ import { Text } from 'react-native';
 import {
   Button, Card, Empty, ErrorBanner, Field, InfoGrid, Loading, Pill, Screen, Segmented, colors, styles,
 } from '@/components/ui';
-import { operatorApi, type OperatorOrg } from '@/lib/api';
+import { inCaseStudy, operatorApi, type OperatorOrg } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatRelative } from '@/lib/format';
+import { CASE_STUDY_MONTHS, statusLine } from '@/lib/operator';
 import { useAsync } from '@/lib/useAsync';
-
-import { statusLine } from '@/lib/operator';
 
 const ZONE = 'Africa/Johannesburg';
 const PLANS = ['trial', 'standard', 'business', 'enterprise'] as const;
@@ -58,10 +57,61 @@ export default function OperatorOrgScreen() {
           { label: 'Last activity', value: org.last_activity_at ? formatRelative(org.last_activity_at) : 'never' },
         ]} />
       </Card>
+      <CaseStudyCard org={org} onSaved={refresh} />
       <SubscriptionEditor org={org} onSaved={refresh} />
       <SupportCard org={org} snapshot={data?.snapshot ?? null} open={!!data?.supportOpen} />
       {org.status === 'cancelled' ? <DeleteCard org={org} /> : null}
     </Screen>
+  );
+}
+
+function CaseStudyCard({ org, onSaved }: { org: OperatorOrg; onSaved: () => void }) {
+  const running = inCaseStudy(org);
+  const paying = (org.status === 'active' || org.status === 'past_due') && org.plan !== 'trial';
+  const [months, setMonths] = useState<(typeof CASE_STUDY_MONTHS)[number]>('12');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function apply(m: number) {
+    setErr(null);
+    if (!note.trim()) return setErr('Add a note, e.g. the agreement or contact person.');
+    const question = m === 0
+      ? [`End ${org.name}'s case study now?`, 'Their 14-day trial starts today; after it they need to subscribe.', 'End case study']
+      : [`Give ${org.name} ${m} months free?`, `Starts today${running ? ', replacing the current case study' : ''}. The normal 14-day trial follows.`, 'Start case study'];
+    if (!(await confirmAction(question[0], question[1], question[2]))) return;
+    setBusy(true);
+    try {
+      await operatorApi.setCaseStudy(org.organization_id, m, note.trim());
+      setNote('');
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Case study">
+      <Text style={styles.hint}>
+        {running
+          ? `Free until ${formatDate(org.case_study_until)}, then a 14-day trial until ${formatDate(org.trial_ends_at)}.`
+          : paying
+            ? 'This is a paying customer, so a case study cannot be started.'
+            : 'Give this organisation a free period. The normal 14-day trial starts when it ends.'}
+      </Text>
+      {!paying ? (
+        <>
+          <Segmented options={CASE_STUDY_MONTHS.map((m) => ({ value: m, label: `${m} months` }))} value={months} onChange={setMonths} />
+          <Field label="Note (required)" value={note} onChangeText={setNote} placeholder="e.g. 2027 case study agreement" multiline />
+          {err ? <ErrorBanner message={err} /> : null}
+          <Button title={running ? `Restart: ${months} months from today` : `Start ${months}-month case study`}
+            onPress={() => apply(Number(months))} loading={busy} />
+          {running ? <Button title="End case study now" variant="danger" onPress={() => apply(0)} disabled={busy} /> : null}
+        </>
+      ) : null}
+    </Card>
   );
 }
 

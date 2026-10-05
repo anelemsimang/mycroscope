@@ -3,7 +3,7 @@ import { Linking, Platform, Text } from 'react-native';
 
 import { ServiceBanner } from '@/components/ServiceBanner';
 import { Button, Card, Empty, ErrorBanner, Field, InfoGrid, Loading, Screen, Segmented, styles } from '@/components/ui';
-import { api, errorMessage } from '@/lib/api';
+import { api, errorMessage, inCaseStudy } from '@/lib/api';
 import { webAppUrl } from '@/lib/authLink';
 import { confirmAction } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
@@ -31,6 +31,7 @@ export default function Billing() {
   if (loading && !data) return <Loading />;
   if (!data?.service) return <Screen><ErrorBanner message={error ?? 'Could not load the subscription.'} onRetry={refresh} /></Screen>;
   const s = data.service;
+  const caseStudy = inCaseStudy(s);
   const seatText = seats || String(Math.max(s.seats, s.seats_used, 1));
 
   async function pay() {
@@ -62,11 +63,12 @@ export default function Billing() {
       <ServiceBanner service={s} timezone={profile.timezone} />
       <Card title="Subscription">
         <InfoGrid items={[
-          { label: 'Status', value: STATUS_LABEL[s.status] ?? s.status },
+          { label: 'Status', value: caseStudy ? 'Free case study' : STATUS_LABEL[s.status] ?? s.status },
           { label: 'Plan', value: s.plan === 'trial' ? 'Trial' : s.plan[0].toUpperCase() + s.plan.slice(1) },
           { label: 'Seats in use', value: `${s.seats_used} of ${s.seats}` },
+          ...(caseStudy ? [{ label: 'Case study ends', value: formatDate(s.case_study_until, profile.timezone) }] : []),
           s.status === 'trialing'
-            ? { label: 'Trial ends', value: formatDate(s.trial_ends_at, profile.timezone) }
+            ? { label: caseStudy ? 'Then trial until' : 'Trial ends', value: formatDate(s.trial_ends_at, profile.timezone) }
             : { label: 'Paid until', value: formatDate(s.current_period_end, profile.timezone) },
         ]} />
         <Text style={styles.hint}>

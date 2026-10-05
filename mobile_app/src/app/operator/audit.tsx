@@ -11,6 +11,10 @@ const ACTION_LABEL: Record<string, string> = {
   subscription_updated: 'Subscription changed',
   support_snapshot_viewed: 'Support view opened',
   organization_deleted: 'Customer deleted',
+  case_study_started: 'Case study started',
+  case_study_ended: 'Case study ended',
+  case_study_invited: 'Case study invite saved',
+  case_study_invite_cancelled: 'Case study invite cancelled',
 };
 
 function describe(e: OperatorAuditEntry, orgNames: Map<string, string>): string {
@@ -27,6 +31,8 @@ function describe(e: OperatorAuditEntry, orgNames: Map<string, string>): string 
     if (changed.length) parts.push(changed.join('; '));
   }
   if (typeof d.accounts === 'number') parts.push(`Logins removed: ${d.accounts}`);
+  if (typeof d.email === 'string') parts.push(`Email: ${d.email}`);
+  if (typeof d.months === 'number' && d.months > 0) parts.push(`Free period: ${d.months} months`);
   return parts.filter(Boolean).join('\n');
 }
 

@@ -52,6 +52,10 @@ export function describeChanges(before: unknown, after: unknown): string {
 
 const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
 
+const PROVIDER_ACTIONS = new Set([
+  'payment_received', 'subscription_changed_by_provider', 'support_access_used', 'case_study_started', 'case_study_ended',
+]);
+
 export function describeAudit(
   e: AuditEntry, names: Map<string, string>, timeZone: string,
 ): { actor: string; title: string; detail: string } {
@@ -60,7 +64,8 @@ export function describeAudit(
     || str(d.name) || 'a deleted employee';
   const actor = e.actor_employee_id
     ? names.get(e.actor_employee_id) ?? 'A deleted user'
-    : e.action === 'retention_purge' ? 'System' : 'Unknown';
+    : e.action === 'retention_purge' ? 'System'
+    : PROVIDER_ACTIONS.has(e.action) ? 'Mycroscope' : 'Unknown';
   const range = d.from && d.to
     ? (String(d.from).includes('T')
       ? `${formatDateTime(str(d.from), timeZone)} to ${formatDateTime(str(d.to), timeZone)}`
@@ -106,6 +111,19 @@ export function describeAudit(
         actor, title: 'Nightly clean-up deleted expired data',
         detail: `${str(d.segments)} activity record(s), ${str(d.events)} event(s), ${str(d.sessions)} session(s), ${str(d.summaries)} daily total(s) older than the retention period`,
       };
+    case 'payment_received':
+      return { actor, title: 'Payment received', detail: `${str(d.seats)} seats × ${str(d.months)} month(s) · reference ${str(d.reference)}` };
+    case 'subscription_changed_by_provider':
+      return { actor, title: 'Subscription changed by Mycroscope', detail: [str(d.plan), str(d.status), d.seats ? `${str(d.seats)} seats` : '', str(d.note)].filter(Boolean).join(' · ') };
+    case 'support_access_used':
+      return { actor, title: 'Mycroscope support opened the technical status view', detail: '' };
+    case 'case_study_started':
+      return {
+        actor, title: 'Free case study started',
+        detail: `Free until ${formatDateTime(str(d.case_study_until), timeZone)}, then a trial until ${formatDateTime(str(d.trial_ends_at), timeZone)}`,
+      };
+    case 'case_study_ended':
+      return { actor, title: 'Free case study ended', detail: `Trial until ${formatDateTime(str(d.trial_ends_at), timeZone)}` };
     default:
       return { actor, title: e.action.replace(/_/g, ' '), detail: '' };
   }

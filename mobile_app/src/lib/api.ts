@@ -132,6 +132,13 @@ export interface ServiceStatus {
   seats: number;
   seats_used: number;
   require_mfa: boolean;
+  /** Free case-study period agreed with Mycroscope; the normal trial follows it. */
+  case_study_until: string | null;
+}
+
+/** True while a free case study is running (the subscription is still 'trialing'). */
+export function inCaseStudy(s: { status: string | null; case_study_until: string | null }, now = Date.now()): boolean {
+  return s.status === 'trialing' && !!s.case_study_until && Date.parse(s.case_study_until) > now;
 }
 
 export interface Team { id: string; name: string }
@@ -186,7 +193,10 @@ export interface OperatorOrg {
   trial_ends_at: string | null;
   current_period_end: string | null;
   support_access_until: string | null;
+  case_study_until: string | null;
 }
+
+export interface CaseStudyInvite { email: string; months: number; note: string; created_at: string }
 
 export interface SystemHealth {
   organizations: number;
@@ -530,4 +540,11 @@ export const operatorApi = {
   supportSnapshot: (org: string) => rpc<SupportSnapshotRow[]>('op_support_snapshot', { p_org: org }),
   deleteOrganization: (org: string, confirmName: string) =>
     rpc<void>('op_delete_organization', { p_org: org, p_confirm_name: confirmName }),
+  /** months 1-24 starts a case study today; 0 ends the running one (the 14-day trial then starts). */
+  setCaseStudy: (org: string, months: number, note: string) =>
+    rpc('op_set_case_study', { p_org: org, p_months: months, p_note: note }),
+  caseStudyInvites: () => rpc<CaseStudyInvite[]>('op_case_study_invites'),
+  inviteCaseStudy: (email: string, months: number, note: string) =>
+    rpc<void>('op_invite_case_study', { p_email: email, p_months: months, p_note: note }),
+  cancelCaseStudyInvite: (email: string) => rpc<void>('op_cancel_case_study_invite', { p_email: email }),
 };
