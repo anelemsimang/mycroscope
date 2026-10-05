@@ -103,17 +103,11 @@ class AgentApp:
         self._closed = False
 
     def _set_window_icon(self) -> None:
+        # The .ico holds 16-256 px. Don't add iconphoto: on Windows it makes the taskbar fall back to python.exe's icon.
         try:
             self.root.iconbitmap(default=str(_asset("mycroscope.ico")))
         except tk.TclError:
             log.warning("Window icon missing")
-        # iconbitmap only carries small sizes; iconphoto supplies sharp large ones (Alt+Tab, high DPI taskbar).
-        try:
-            from PIL import ImageTk
-            self._icon_photos = [ImageTk.PhotoImage(_logo(s)) for s in (256, 64, 32)]
-            self.root.iconphoto(True, *self._icon_photos)
-        except Exception:  # noqa: BLE001 - cosmetic only
-            log.warning("Large window icon unavailable", exc_info=True)
 
     # ---- plumbing --------------------------------------------------------
     def post(self, fn: Callable[[], None]) -> None:
