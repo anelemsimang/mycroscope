@@ -27,6 +27,8 @@ STATE_LABELS = {
     "idle": ("Idle", C["warning"]),
     "away": ("Away (locked or asleep)", C["text_secondary"]),
     "paused": ("Tracking paused", C["warning"]),
+    "off_hours": ("Outside working hours — not recording", C["text_secondary"]),
+    "inactive": ("Not recording — your organisation's subscription is inactive", C["text_secondary"]),
     "logged_out": ("Not tracking", C["text_secondary"]),
 }
 
@@ -394,9 +396,20 @@ class AgentApp:
             items.append("full website addresses")
         elif s.track_web_domains:
             items.append("website domains")
-        return ("While you are signed in, Mycroscope records " + ", ".join(items) +
-                ". Your manager can see this. It never records keystrokes, screenshots or file contents. "
-                "It starts automatically when you sign in to Windows; signing out stops tracking.")
+        sched = s.schedule
+        if sched.mode == "work_hours":
+            days = ", ".join(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[d - 1] for d in sorted(sched.work_days))
+            when = (f"During working hours ({days}, {sched.work_start:%H:%M}–{sched.work_end:%H:%M}) "
+                    "Mycroscope records ")
+            outside = (" Outside working hours it only notes that the PC was in use, never what for."
+                       if s.flag_after_hours_use else " Outside working hours it records nothing.")
+        else:
+            when = "While you are signed in, Mycroscope records "
+            outside = ""
+        extra = " It also checks that it keeps running and that input is from a person." if s.detect_tampering else ""
+        return (when + ", ".join(items) + "." + outside +
+                " Your manager can see this. It never records keystrokes, screenshots or file contents." + extra +
+                " It starts automatically when you sign in to Windows; signing out stops tracking.")
 
     def _refresh_status(self) -> None:
         w = self.status_widgets
@@ -521,6 +534,7 @@ class AgentApp:
 
     def _on_session_end(self) -> None:
         log.info("Windows session ending")
+        self.agent.windows_session_ending = True
         self._quit()
 
     def _quit(self) -> None:

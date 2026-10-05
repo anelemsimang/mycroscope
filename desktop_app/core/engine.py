@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 
 from config import MAX_SEGMENT_SECONDS, PERSIST_OPEN_SEGMENT_SECONDS, SLEEP_GAP_SECONDS, TITLE_DEBOUNCE_SECONDS
 from core.monitor import Sample
+from core.schedule import Schedule
 from core.store import LocalStore
 from utils.logger import get_logger
 
@@ -40,12 +41,15 @@ class TrackingSettings:
     track_full_urls: bool = True
     idle_threshold_seconds: int = 300
     allow_pause: bool = True
+    flag_after_hours_use: bool = False
+    detect_tampering: bool = False
+    schedule: Schedule = field(default_factory=Schedule)
 
     @classmethod
-    def from_dict(cls, d: Optional[dict[str, Any]]) -> "TrackingSettings":
+    def from_dict(cls, d: Optional[dict[str, Any]], timezone: str = "Africa/Johannesburg") -> "TrackingSettings":
         d = d or {}
-        known = {k: d[k] for k in cls.__dataclass_fields__ if k in d and d[k] is not None}
-        return cls(**known)
+        known = {k: d[k] for k in cls.__dataclass_fields__ if k in d and d[k] is not None and k != "schedule"}
+        return cls(**known, schedule=Schedule.from_settings(d, timezone))
 
     def narrowed_to(self, acknowledged: Optional["TrackingSettings"]) -> "TrackingSettings":
         """Records nothing the employee has not acknowledged; used while a new notice awaits acknowledgement.
@@ -60,6 +64,9 @@ class TrackingSettings:
             track_full_urls=self.track_full_urls and a.track_full_urls,
             idle_threshold_seconds=self.idle_threshold_seconds,
             allow_pause=self.allow_pause or a.allow_pause,
+            flag_after_hours_use=self.flag_after_hours_use and a.flag_after_hours_use,
+            detect_tampering=self.detect_tampering and a.detect_tampering,
+            schedule=self.schedule.narrowed_to(acknowledged.schedule if acknowledged else None),
         )
 
 
@@ -84,6 +91,7 @@ class SegmentEngine:
         self.last_tick: Optional[datetime] = None
         self._last_persist: Optional[datetime] = None
         self._locked = False
+        self.suspended = False
         self.live = LiveState()
 
     # ---- public ----------------------------------------------------------
@@ -91,8 +99,20 @@ class SegmentEngine:
         self.session_started_at = now
         self.last_tick = now
 
+    def suspend(self, now: datetime, state: str) -> None:
+        """Stop recording (outside working hours, subscription inactive); the next tick resumes."""
+        if not self.suspended:
+            self.stop(now)
+            self.suspended = True
+        self.last_tick = max(now, self.last_tick or now)
+        self.live = LiveState(state=state)
+
     def tick(self, now: datetime, sample: Sample, paused: bool, project_id: Optional[str]) -> None:
         if self.last_tick is not None and now <= self.last_tick:
+            return
+        if self.suspended:
+            self.suspended = False
+            self.start(now)
             return
         if self.last_tick is not None and (now - self.last_tick).total_seconds() > SLEEP_GAP_SECONDS:
             self._handle_gap(self.last_tick, now)

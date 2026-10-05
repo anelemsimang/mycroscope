@@ -32,8 +32,10 @@ class SyncService:
                  status_provider: Callable[[], dict[str, Any]],
                  on_policy: Callable[[dict[str, Any]], None],
                  on_auth_lost: Callable[[str], None],
-                 on_connectivity: Callable[[bool], None]):
+                 on_connectivity: Callable[[bool], None],
+                 on_service: Optional[Callable[[Optional[dict[str, Any]]], None]] = None):
         self.api = api
+        self.on_service = on_service
         self.store = store
         self.identity = identity
         self.clock = clock
@@ -121,6 +123,13 @@ class SyncService:
         self._last_policy = time.time()
         if rows:
             self.on_policy(rows[0])
+        if self.on_service:
+            try:
+                status = self.api.rpc("get_my_service_status")
+            except ApiError as exc:
+                log.info("Service status unavailable: %s", exc)
+                return
+            self.on_service(status[0] if status else None)
 
     # ---- steps -----------------------------------------------------------
     def _ensure_device(self) -> None:

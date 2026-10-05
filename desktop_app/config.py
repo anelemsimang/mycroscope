@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 APP_NAME = "Mycroscope"
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).parent
@@ -17,10 +17,16 @@ LOGS_DIR = DATA_DIR / "logs"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
+# Installed by an administrator for every user (install-machine.ps1); employees cannot change these files.
+MACHINE_INSTALL = (BASE_DIR / "machine-install").exists()
+MACHINE_CONFIG = Path(os.getenv("PROGRAMDATA") or "C:/ProgramData") / APP_NAME / "agent.env"
+
 # Packaged installs keep config in the data dir; dev runs use desktop_app/.env.
-# The agent's own files win over machine-wide environment variables.
+# The agent's own files win over machine-wide environment variables; an administrator's config wins over both.
 load_dotenv(BASE_DIR / ".env", override=True)
 load_dotenv(DATA_DIR / "agent.env", override=True)
+if MACHINE_INSTALL:
+    load_dotenv(MACHINE_CONFIG, override=True)
 
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()

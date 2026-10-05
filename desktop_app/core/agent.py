@@ -18,6 +18,7 @@ from config import (CREDENTIALS_FILE, DEFAULT_SETTINGS, LOCAL_DB_FILE, MAX_CLOCK
                     SAMPLE_INTERVAL_SECONDS, SUPABASE_KEY, SUPABASE_URL, VERSION, WEB_APP_URL)
 from core.api import ApiError, AuthError, NetworkError, Session, SupabaseApi, to_server_time
 from core.credentials import CredentialStore
+from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
 from core.store import LocalStore
 from core.sync import SyncService
@@ -60,6 +61,8 @@ class Agent:
         self._stop_tracking = threading.Event()
         self.tracking = False
         self.auth_lost_message = ""
+        self.service: Optional[dict[str, Any]] = None
+        self.windows_session_ending = False
 
     # ---- authentication --------------------------------------------------
     def _persist_session(self, session: Optional[Session]) -> None:
@@ -87,6 +90,7 @@ class Agent:
             self.api.session = Session("", saved["refresh_token"], 0, "", saved.get("email", ""))
             self.profile = Profile(**cached)
             self.policy = self._cached("policy")
+            self.service = self._cached("service")
             if self.policy:
                 self.settings = self._effective_settings(self.policy)
             return True
@@ -142,6 +146,8 @@ class Agent:
             self._cache(f"ack_settings:{self.profile.employee_id}", None)
         self._cache("profile", None)
         self._cache("policy", None)
+        self._cache("service", None)
+        self.service = None
 
     def _check_clock(self) -> None:
         offset = self.api.clock_offset_seconds or 0.0
@@ -159,7 +165,33 @@ class Agent:
                 return self.policy
             raise
         self._apply_policy(rows[0] if rows else None)
+        self.refresh_service()
         return self.policy
+
+    # ---- subscription ----------------------------------------------------
+    def refresh_service(self) -> None:
+        try:
+            rows = self.api.rpc("get_my_service_status")
+        except NetworkError:
+            return
+        except ApiError as exc:
+            log.info("Service status unavailable: %s", exc)
+            return
+        self._apply_service(rows[0] if rows else None)
+
+    def _apply_service(self, status: Optional[dict[str, Any]]) -> None:
+        was_active = self.service_active
+        self.service = status
+        self._cache("service", status)
+        if was_active and not self.service_active and self.sync:
+            self.sync.record_event("service_inactive", {"status": (status or {}).get("status")})
+        if was_active != self.service_active:
+            self.on_change("state")
+
+    @property
+    def service_active(self) -> bool:
+        """Recording is allowed unless the server says the subscription is not in full service."""
+        return (self.service or {}).get("level", "full") == "full"
 
     def _apply_policy(self, policy: Optional[dict[str, Any]]) -> None:
         previous = self.policy
@@ -179,7 +211,8 @@ class Agent:
 
     def _effective_settings(self, policy: dict[str, Any]) -> TrackingSettings:
         """The policy's settings, narrowed to what was last acknowledged until this version is acknowledged."""
-        published = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(policy.get("settings") or {})})
+        tz = self.profile.timezone if self.profile else "Africa/Johannesburg"
+        published = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(policy.get("settings") or {})}, tz)
         if not self.profile:
             return published
         key = f"ack_settings:{self.profile.employee_id}"
@@ -193,7 +226,7 @@ class Agent:
                 self._cache(key, acknowledged)
         if acknowledged is None:
             return published.narrowed_to(None)
-        return published.narrowed_to(TrackingSettings.from_dict({**DEFAULT_SETTINGS, **acknowledged}))
+        return published.narrowed_to(TrackingSettings.from_dict({**DEFAULT_SETTINGS, **acknowledged}, tz))
 
     def _fetch_acknowledged_settings(self) -> Optional[dict[str, Any]]:
         """Settings of the notice this employee most recently acknowledged (on any device)."""
@@ -280,6 +313,7 @@ class Agent:
             on_policy=self._apply_policy,
             on_auth_lost=self._auth_lost,
             on_connectivity=lambda online: self.on_change("connectivity"),
+            on_service=self._apply_service,
         )
         self.engine = SegmentEngine(self.store, self.identity, self.settings, self._engine_event)
         self.engine.start(now)
@@ -287,6 +321,7 @@ class Agent:
         offset = self.api.clock_offset_seconds
         if offset is not None and abs(offset) > MAX_CLOCK_SKEW_SECONDS:
             self.sync.record_event("clock_skew", {"offset_seconds": round(offset)}, at=now)
+        self._integrity_on_start(now)
         self.paused = False
         self._stop_tracking.clear()
         self._tracker = threading.Thread(target=self._track_loop, name="tracker", daemon=True)
@@ -303,21 +338,99 @@ class Agent:
         if kind == "wake" and self.sync:
             self.sync.poke()
 
+    # ---- integrity -------------------------------------------------------
+    def _heartbeat_key(self) -> str:
+        return f"heartbeat:{self.profile.employee_id}"
+
+    def _write_heartbeat(self, now: datetime, clean: bool = False) -> None:
+        self.store.set(self._heartbeat_key(), json.dumps(
+            integrity.heartbeat(now, integrity.boot_time(now), integrity.awake_seconds(), clean)))
+
+    def _integrity_on_start(self, now: datetime) -> None:
+        previous = self._cached_heartbeat()
+        self._write_heartbeat(now)
+        if not self.settings.detect_tampering:
+            return
+        gap = integrity.detect_gap(previous, now, integrity.boot_time(now), integrity.awake_seconds())
+        if gap and self.settings.schedule.overlaps(datetime.fromisoformat(gap["since"]), now):
+            self.sync.record_event("agent_gap", gap, at=now)
+        vendor = integrity.virtual_machine_vendor()
+        if vendor:
+            self.sync.record_event("vm_detected", {"vendor": vendor}, at=now)
+
+    def _cached_heartbeat(self) -> Optional[dict[str, Any]]:
+        raw = self.store.get(self._heartbeat_key())
+        try:
+            return json.loads(raw) if raw else None
+        except ValueError:
+            return None
+
+    def recording_block(self, now: datetime) -> Optional[str]:
+        """Why nothing is recorded right now: 'inactive' (subscription), 'off_hours', or None."""
+        if not self.service_active:
+            return "inactive"
+        if not self.settings.schedule.is_work_time(now):
+            return "off_hours"
+        return None
+
     def _track_loop(self) -> None:
         from core.monitor import SystemMonitor
         monitor = SystemMonitor()
+        rhythm = integrity.InputPatternDetector()
         last_state = None
+        working: Optional[bool] = None
+        last_after_hours: Optional[datetime] = None
+        last_heartbeat = last_remote_check = None
+        remote = False
         try:
             while not self._stop_tracking.is_set():
                 s = self.settings
-                want_url = s.track_web_domains
-                sample = monitor.sample(s.track_apps or want_url, s.track_window_titles, want_url)
                 now = self.clock.now()
-                with self._engine_lock:
-                    if self.engine is None:
-                        break
-                    self.engine.tick(now, sample, self.paused, self.project_id)
-                    state = self.engine.live.state
+                block = self.recording_block(now)
+                if block:
+                    sample = monitor.sample(False, False, False)
+                    with self._engine_lock:
+                        if self.engine is None:
+                            break
+                        self.engine.suspend(now, block)
+                        state = block
+                    rhythm.reset()
+                    in_use = not sample.locked and sample.idle_seconds < s.idle_threshold_seconds
+                    if block == "off_hours" and s.flag_after_hours_use and in_use and \
+                            (last_after_hours is None or now - last_after_hours >= timedelta(hours=1)):
+                        last_after_hours = now
+                        self.sync.record_event("after_hours_use", {}, at=now)
+                else:
+                    want_url = s.track_web_domains
+                    sample = monitor.sample(s.track_apps or want_url, s.track_window_titles, want_url)
+                    with self._engine_lock:
+                        if self.engine is None:
+                            break
+                        self.engine.tick(now, sample, self.paused, self.project_id)
+                        state = self.engine.live.state
+                    if s.detect_tampering and not (self.paused or sample.locked):
+                        anomaly = rhythm.observe(now, sample.idle_seconds, (sample.process_name, sample.window_title))
+                        if anomaly:
+                            self.sync.record_event("input_anomaly", anomaly, at=now)
+                    elif sample.locked:
+                        rhythm.reset()
+
+                if s.schedule.mode == "work_hours" and block != "inactive":
+                    is_working = block is None
+                    if working is not None and is_working != working:
+                        self.sync.record_event("work_hours_start" if is_working else "work_hours_end", {}, at=now)
+                    working = is_working
+
+                if last_heartbeat is None or (now - last_heartbeat).total_seconds() >= 60:
+                    last_heartbeat = now
+                    self._write_heartbeat(now)
+                if s.detect_tampering and (last_remote_check is None or (now - last_remote_check).total_seconds() >= 60):
+                    last_remote_check = now
+                    now_remote = integrity.is_remote_session()
+                    if now_remote and not remote:
+                        self.sync.record_event("remote_session", {}, at=now)
+                    remote = now_remote
+
                 if state != last_state:
                     last_state = state
                     self.on_change("state")
@@ -346,6 +459,8 @@ class Agent:
             if self.engine:
                 self.engine.stop(now)
             self.engine = None
+        # Signing out, being signed out, or Windows ending the session is not a gap; being killed is.
+        self._write_heartbeat(now, clean=reason in ("logout", "auth_lost") or self.windows_session_ending)
         end_reason = "logout" if reason == "logout" else "shutdown"
         for sess in self.store.open_sessions(self.profile.employee_id):
             if sess["id"] == self.identity.session_id:

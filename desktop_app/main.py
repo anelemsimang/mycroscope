@@ -48,13 +48,14 @@ def _selftest() -> int:
 
 
 def main(argv: list[str]) -> int:
-    from config import APP_NAME, SUPABASE_KEY, SUPABASE_URL, VERSION
+    from config import APP_NAME, MACHINE_INSTALL, SUPABASE_KEY, SUPABASE_URL, VERSION
     from utils import autostart
 
     if "--selftest" in argv:
         return _selftest()
     if "--install-autostart" in argv:
-        autostart.install()
+        if not MACHINE_INSTALL:
+            autostart.install()
         return 0
     if "--uninstall-autostart" in argv:
         autostart.uninstall()
@@ -64,7 +65,8 @@ def main(argv: list[str]) -> int:
     threading.excepthook = lambda args: _log_unhandled(args.exc_type, args.exc_value, args.exc_traceback)
 
     watchdog = "--watchdog" in argv
-    if watchdog and autostart.STOP_MARKER.exists():
+    # On administrator-installed PCs the agent always runs; signing out of it is still possible and visible.
+    if watchdog and autostart.STOP_MARKER.exists() and not MACHINE_INSTALL:
         return 0
 
     mutex = _single_instance()
@@ -79,11 +81,12 @@ def main(argv: list[str]) -> int:
 
     if not SUPABASE_URL or not SUPABASE_KEY:
         import tkinter.messagebox as mb
+        where = "%ProgramData%\\Mycroscope\\agent.env" if MACHINE_INSTALL else "%LOCALAPPDATA%\\Mycroscope\\agent.env"
         mb.showerror(APP_NAME, "Mycroscope is not configured: SUPABASE_URL and SUPABASE_KEY are missing.\n"
-                               "Put them in %LOCALAPPDATA%\\Mycroscope\\agent.env.")
+                               f"Put them in {where}.")
         return 2
 
-    if getattr(sys, "frozen", False):
+    if getattr(sys, "frozen", False) and not MACHINE_INSTALL:
         threading.Thread(target=autostart.ensure_installed, daemon=True).start()
 
     log.info("Starting %s agent v%s", APP_NAME, VERSION)
