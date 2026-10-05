@@ -1,0 +1,11 @@
+# Supabase Configuration
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_KEY=your-anon-key
+
+# Security Settings
+ENCRYPTION_KEY=your-secret-key-32-chars-long-here
+ADMIN_PASSWORD=admin123
+
+# Optional: Override default settings
+LOG_LEVEL=INFO
+IDLE_THRESHOLD=300 

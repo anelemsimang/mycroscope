@@ -1,0 +1,13 @@
+psutil==5.9.5
+pynput==1.7.6
+pyautogui==0.9.54
+supabase==1.0.3
+cryptography==41.0.7
+schedule==1.2.0
+tkinter-tooltip==2.0.0
+Pillow==10.0.1
+requests==2.31.0
+python-dotenv==1.0.0
+pywin32==306; sys_platform == "win32"
+pyobjc-framework-Cocoa==10.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==10.1; sys_platform == "darwin" 
