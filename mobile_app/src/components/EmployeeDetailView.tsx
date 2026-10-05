@@ -25,6 +25,7 @@ const TABS: { value: Tab; label: string }[] = [
 ];
 const PERIODS = (Object.keys(PERIOD_LABELS) as PeriodKey[]).map((value) => ({ value, label: PERIOD_LABELS[value] }));
 const HISTORY_DAYS = 30;
+const ALL_PROJECTS = 'all';
 const roleLabel = { owner: 'Owner', manager: 'Manager', employee: 'Employee' } as const;
 
 interface Props {
@@ -41,6 +42,7 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
   const today = todayIn(timezone);
   const [tab, setTab] = useState<Tab>('overview');
   const [period, setPeriod] = useState<PeriodKey>('today');
+  const [project, setProject] = useState<string>(ALL_PROJECTS);
 
   useEffect(() => {
     if (!isSelf) api.logAccess(id, 'viewed_employee', {});
@@ -96,7 +98,8 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
         {tab === 'overview' ? <Overview id={id} timezone={timezone} today={today} status={status} /> : null}
         {tab === 'activity' ? <ActivityTab id={id} timezone={timezone} today={today} status={status} /> : null}
         {tab === 'apps' ? (
-          <AppsWeb id={id} name={employee.name} timezone={timezone} today={today} period={period} setPeriod={setPeriod} />
+          <AppsWeb id={id} name={employee.name} timezone={timezone} today={today} period={period} setPeriod={setPeriod}
+            project={project} setProject={setProject} />
         ) : null}
         {tab === 'history' ? <History id={id} name={employee.name} timezone={timezone} today={today} isSelf={isSelf} /> : null}
 
@@ -199,25 +202,43 @@ function ActivityTab({ id, timezone, today, status }: { id: string; timezone: st
   );
 }
 
-function AppsWeb({ id, name, timezone, today, period, setPeriod }: {
+function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setProject }: {
   id: string; name: string; timezone: string; today: string; period: PeriodKey; setPeriod: (p: PeriodKey) => void;
+  project: string; setProject: (p: string) => void;
 }) {
   const range = periodRange(period, today);
+  const projectId = project === ALL_PROJECTS ? null : project;
+  const projectList = useAsync(() => api.projects(), []);
   const { data, error, loading, refresh } = useAsync(async () => {
     const [apps, domains, projects] = await Promise.all([
-      api.appTotals(id, range.from, range.to),
-      api.domainTotals(id, range.from, range.to),
+      api.appTotals(id, range.from, range.to, projectId),
+      api.domainTotals(id, range.from, range.to, projectId),
       api.projectTotals(id, range.from, range.to),
     ]);
     return { apps, domains, projects };
-  }, [id, range.from, range.to]);
+  }, [id, range.from, range.to, projectId]);
   const projectMax = Math.max(0, ...(data?.projects ?? []).map((p) => p.active_seconds));
-  const params = { id, from: range.from, to: range.to, label: PERIOD_LABELS[period], name };
+  const projectName = projectList.data?.find((p) => p.id === projectId)?.name;
+  const params = {
+    id, from: range.from, to: range.to, name,
+    label: projectName ? `${PERIOD_LABELS[period]} · ${projectName}` : PERIOD_LABELS[period],
+    ...(projectId ? { project: projectId } : {}),
+  };
+  const projectOptions = [
+    { value: ALL_PROJECTS, label: 'All projects' },
+    ...(projectList.data ?? []).map((p) => ({ value: p.id, label: p.is_active ? p.name : `${p.name} (archived)` })),
+  ];
 
   return (
     <>
+      {projectOptions.length > 1 ? (
+        <Segmented options={projectOptions} value={project} onChange={setProject} />
+      ) : null}
       <Segmented options={PERIODS} value={period} onChange={setPeriod} />
-      <Text style={styles.hint}>{range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`}</Text>
+      <Text style={styles.hint}>
+        {range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`}
+        {projectName ? ` · project ${projectName}` : ''}
+      </Text>
       {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
       {loading && !data ? <Loading /> : null}
       {data ? (
@@ -238,7 +259,7 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod }: {
                 onPress={() => router.push({ pathname: '/website', params: { ...params, domain: d.domain } })} />
             ))}
           </Card>
-          {data.projects.length > 0 ? (
+          {!projectId && data.projects.length > 0 ? (
             <Card title="Projects">
               {data.projects.map((p) => (
                 <BarRow key={p.project_id ?? 'none'} label={p.project_name} value={p.active_seconds} max={projectMax}

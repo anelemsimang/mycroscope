@@ -285,6 +285,72 @@ test('changing tracking settings publishes a new notice and requires re-acknowle
   assert.equal(empAudit.rows[0].n, 0, 'employees must not read the audit log');
 });
 
+const COMPLIANCE_SQL = 'select * from save_compliance_settings($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)';
+
+test('saving settings and the Information Officer together publishes one notice version', async () => {
+  const before = await asUser(ctx.ownerAuth, 'select max(version)::int as v from monitoring_policies');
+  const saved = await asUser(ctx.ownerAuth, COMPLIANCE_SQL,
+    [true, false, true, false, 600, false, 60, 365, 'Applies to company laptops.', 'Lerato Officer', 'privacy@acme.co.za']);
+  assert.equal(saved.rows[0].version, before.rows[0].v + 1);
+  assert.match(saved.rows[0].notice_text, /Lerato Officer \(privacy@acme\.co\.za\)/);
+  assert.match(saved.rows[0].notice_text, /Applies to company laptops\./);
+  assert.match(saved.rows[0].notice_text, /deleted after 60 days/);
+  assert.match(saved.rows[0].notice_text, /cannot be paused/);
+  assert.doesNotMatch(saved.rows[0].notice_text, /Window titles/);
+  const published = await asUser(ctx.ownerAuth,
+    `select count(*)::int as n from audit_log where action = 'policy_published' and details->>'version' = $1`,
+    [String(saved.rows[0].version)]);
+  assert.equal(published.rows[0].n, 1);
+
+  const again = await asUser(ctx.ownerAuth, COMPLIANCE_SQL,
+    [true, false, true, false, 600, false, 60, 365, 'Applies to company laptops.', 'Lerato Officer', 'privacy@acme.co.za']);
+  assert.equal(again.rows[0].version, saved.rows[0].version, 'saving without changes must not publish');
+});
+
+test('compliance settings are validated and limited to managers', async () => {
+  await rejects(asUser(ctx.empAuth, COMPLIANCE_SQL,
+    [true, true, true, true, 300, true, 90, 730, null, null, null]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL,
+    [true, true, false, true, 300, true, 90, 730, null, null, null]), /only be recorded when websites/);
+  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL,
+    [true, true, true, true, 300, true, 90, 730, null, 'X', 'not-an-email']), /not valid/);
+  await rejects(asUser(ctx.ownerAuth, COMPLIANCE_SQL,
+    [true, true, true, true, 300, true, 3, 730, null, null, null]), /check constraint/);
+});
+
+test('reports can be filtered by project', async () => {
+  const proj = await asUser(ctx.empAuth,
+    `insert into projects (organization_id, name, created_by) values ($1, 'Client A', $2) returning id`,
+    [ctx.orgId, ctx.empId]);
+  ctx.projectId = proj.rows[0].id;
+  for (const [start, end, app, domain, project] of [
+    ['2026-10-03T08:00:00Z', '2026-10-03T08:20:00Z', 'Chrome', 'clienta.com', ctx.projectId],
+    ['2026-10-03T09:00:00Z', '2026-10-03T09:10:00Z', 'Excel', null, null],
+  ]) {
+    await db.query(
+      `insert into activity_segments (id, organization_id, employee_id, device_id, project_id, state, started_at, ended_at, app_name, domain, updated_at)
+       values ($1, $2, $3, $4, $5, 'active', $6, $7, $8, $9, $7)`,
+      [randomUUID(), ctx.orgId, ctx.empId, ctx.deviceId, project, start, end, app, domain]);
+  }
+
+  const all = await asUser(ctx.ownerAuth,
+    `select active_seconds::int from get_daily_totals($1, '2026-10-03', '2026-10-03')`, [ctx.empId]);
+  assert.equal(all.rows[0].active_seconds, 1800);
+  const filtered = await asUser(ctx.ownerAuth,
+    `select active_seconds::int from get_daily_totals($1, '2026-10-03', '2026-10-03', $2)`, [ctx.empId, ctx.projectId]);
+  assert.equal(filtered.rows[0].active_seconds, 1200);
+  const apps = await asUser(ctx.ownerAuth,
+    `select app_name from get_app_totals($1, '2026-10-03', '2026-10-03', $2)`, [ctx.empId, ctx.projectId]);
+  assert.deepEqual(apps.rows, [{ app_name: 'Chrome' }]);
+  const domains = await asUser(ctx.ownerAuth,
+    `select domain from get_domain_totals($1, '2026-10-03', '2026-10-03', $2)`, [ctx.empId, ctx.projectId]);
+  assert.deepEqual(domains.rows, [{ domain: 'clienta.com' }]);
+  const timeline = await asUser(ctx.ownerAuth,
+    `select project_name from get_timeline($1, '2026-10-03', $2)`, [ctx.empId, ctx.projectId]);
+  assert.deepEqual(timeline.rows, [{ project_name: 'Client A' }]);
+  await rejects(asAnon(`select * from get_app_totals($1, '2026-10-03', '2026-10-03')`, [ctx.empId]), /permission denied/);
+});
+
 test('role rules: only the owner manages managers and roles', async () => {
   const mgr = await asUser(ctx.ownerAuth, `select * from create_employee('Mary Manager', 'mary@acme.co.za', 'manager')`);
   const mgrAuth = await signUp('mary@acme.co.za', {

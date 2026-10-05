@@ -101,7 +101,7 @@ export function Field({ label, hint, secureTextEntry, ...props }: TextInputProps
       <Text style={styles.label}>{label}</Text>
       <View>
         <TextInput placeholderTextColor={colors.muted} {...props}
-          style={[styles.input, secureTextEntry ? { paddingRight: 64 } : null]}
+          style={[styles.input, props.style, secureTextEntry ? { paddingRight: 64 } : null]}
           secureTextEntry={secureTextEntry && !revealed}
           autoCapitalize={secureTextEntry ? 'none' : props.autoCapitalize}
           autoCorrect={secureTextEntry ? false : props.autoCorrect} />

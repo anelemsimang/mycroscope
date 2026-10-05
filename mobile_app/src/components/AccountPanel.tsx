@@ -1,8 +1,9 @@
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Text } from 'react-native';
 
-import { Button, Card, ErrorBanner, Field, Screen, styles } from '@/components/ui';
+import { Button, Card, ErrorBanner, Field, LinkRow, Screen, styles } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { useProfile, useSession } from '@/lib/session';
@@ -12,7 +13,7 @@ const roleLabel = { owner: 'Owner', manager: 'Manager', employee: 'Employee' } a
 
 export function AccountPanel() {
   const profile = useProfile();
-  const { signOut } = useSession();
+  const { signOut, isManager } = useSession();
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,6 +44,18 @@ export function AccountPanel() {
         <Text style={styles.hint}>{roleLabel[profile.role]} · {profile.organizationName}</Text>
         <Text style={styles.hint}>Employee code {profile.employeeCode} · timezone {profile.timezone}</Text>
       </Card>
+      {isManager ? (
+        <Card title="Compliance (POPIA / RICA)">
+          <LinkRow title="Monitoring & privacy" subtitle="What is recorded, retention, Information Officer, notice text"
+            onPress={() => router.push('/monitoring')} />
+          <LinkRow title="Notice acknowledgements" subtitle="Who has acknowledged the current monitoring notice"
+            onPress={() => router.push('/acknowledgements')} />
+          <LinkRow title="Notice history" subtitle="Every published version of the notice"
+            onPress={() => router.push('/notice-history')} />
+          <LinkRow title="Audit log" subtitle="Views, exports, deletions and setting changes"
+            onPress={() => router.push('/audit-log')} />
+        </Card>
+      ) : null}
       <Card title="Change password">
         {error ? <ErrorBanner message={error} /> : null}
         <Field label="New password" value={password} onChangeText={setPassword} secureTextEntry textContentType="newPassword" />

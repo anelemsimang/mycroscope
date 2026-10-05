@@ -48,7 +48,9 @@ function summarise(rows: SegmentRow[], fromMs: number, toMs: number, keyOf: (r: 
 export function UsageDetail({ kind }: { kind: 'app' | 'website' }) {
   const profile = useProfile();
   const tz = profile.timezone;
-  const p = useLocalSearchParams<{ id: string; app?: string; domain?: string; from?: string; to?: string; label?: string; name?: string }>();
+  const p = useLocalSearchParams<{
+    id: string; app?: string; domain?: string; from?: string; to?: string; label?: string; name?: string; project?: string;
+  }>();
   const today = todayIn(tz);
   const from = p.from ?? today;
   const to = p.to ?? today;
@@ -57,8 +59,9 @@ export function UsageDetail({ kind }: { kind: 'app' | 'website' }) {
   const toIso = dayStartUtc(addDays(to, 1), tz);
 
   const { data, error, loading, refreshing, refresh } = useAsync(
-    () => api.segments(p.id, fromIso, toIso, kind === 'app' ? { app: subject } : { domain: subject }),
-    [p.id, fromIso, toIso, subject, kind]);
+    () => api.segments(p.id, fromIso, toIso,
+      { ...(kind === 'app' ? { app: subject } : { domain: subject }), project: p.project || null }),
+    [p.id, fromIso, toIso, subject, kind, p.project]);
 
   const summary = useMemo(() => data ? summarise(data, Date.parse(fromIso), Date.parse(toIso), (r) => kind === 'app'
     ? [r.window_title ?? '', r.window_title ?? 'Window title not recorded', null]

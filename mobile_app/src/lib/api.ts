@@ -88,6 +88,45 @@ export interface SegmentRow {
   domain: string | null;
 }
 
+export interface Project { id: string; name: string; is_active: boolean }
+
+export interface ComplianceSettings {
+  track_apps: boolean;
+  track_window_titles: boolean;
+  track_web_domains: boolean;
+  track_full_urls: boolean;
+  idle_threshold_seconds: number;
+  allow_pause: boolean;
+  retention_days: number;
+  summary_retention_days: number;
+  notice_custom_text: string | null;
+  information_officer_name: string | null;
+  information_officer_email: string | null;
+  updated_at: string;
+}
+
+export interface Policy {
+  id: string;
+  version: number;
+  notice_text: string;
+  published_at: string;
+  published_by: string | null;
+}
+
+export interface Consent { employee_id: string; policy_id: string; acknowledged_at: string; agent_version: string | null }
+
+export interface AuditEntry {
+  id: number;
+  actor_employee_id: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export const AUDIT_PAGE = 50;
+
 /** PostgREST returns at most this many rows per request (Supabase default). */
 export const SEGMENT_LIMIT = 1000;
 
@@ -122,6 +161,8 @@ function numeric<T extends object>(rows: T[] | null, keys: (keyof T)[]): T[] {
   });
 }
 
+const projectArg = (project?: string | null) => (project ? { p_project: project } : {});
+
 export const api = {
   resolveLoginEmail: (identifier: string) => rpc<string | null>('resolve_login_email', { p_identifier: identifier }),
 
@@ -129,23 +170,86 @@ export const api = {
     numeric(await rpc<TeamRow[]>('get_team_overview', day ? { p_day: day } : {}),
       ['active_seconds', 'idle_seconds', 'away_seconds', 'paused_seconds']),
 
-  dailyTotals: async (employee: string, from: Ymd, to: Ymd) =>
-    numeric(await rpc<DailyTotal[]>('get_daily_totals', { p_employee: employee, p_from: from, p_to: to }),
+  dailyTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
+    numeric(await rpc<DailyTotal[]>('get_daily_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
       ['active_seconds', 'idle_seconds', 'away_seconds', 'paused_seconds']),
 
-  appTotals: async (employee: string, from: Ymd, to: Ymd) =>
-    numeric(await rpc<AppTotal[]>('get_app_totals', { p_employee: employee, p_from: from, p_to: to }),
+  appTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
+    numeric(await rpc<AppTotal[]>('get_app_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
       ['active_seconds', 'idle_seconds']),
 
-  domainTotals: async (employee: string, from: Ymd, to: Ymd) =>
-    numeric(await rpc<DomainTotal[]>('get_domain_totals', { p_employee: employee, p_from: from, p_to: to }),
+  domainTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
+    numeric(await rpc<DomainTotal[]>('get_domain_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
       ['active_seconds', 'idle_seconds']),
 
   projectTotals: async (employee: string, from: Ymd, to: Ymd) =>
     numeric(await rpc<ProjectTotal[]>('get_project_totals', { p_employee: employee, p_from: from, p_to: to }),
       ['active_seconds', 'idle_seconds']),
 
-  timeline: (employee: string, day: Ymd) => rpc<TimelineRow[]>('get_timeline', { p_employee: employee, p_day: day }),
+  timeline: (employee: string, day: Ymd, project?: string | null) =>
+    rpc<TimelineRow[]>('get_timeline', { p_employee: employee, p_day: day, ...projectArg(project) }),
+
+  projects: async () => {
+    const { data, error } = await supabase.from('projects').select('id,name,is_active').order('name');
+    if (error) throw error;
+    return (data ?? []) as Project[];
+  },
+
+  complianceSettings: async (organizationId: string): Promise<ComplianceSettings> => {
+    const [settings, org] = await Promise.all([
+      supabase.from('organization_settings')
+        .select('track_apps,track_window_titles,track_web_domains,track_full_urls,idle_threshold_seconds,allow_pause,retention_days,summary_retention_days,notice_custom_text,updated_at')
+        .eq('organization_id', organizationId).single(),
+      supabase.from('organizations').select('information_officer_name,information_officer_email').eq('id', organizationId).single(),
+    ]);
+    if (settings.error) throw settings.error;
+    if (org.error) throw org.error;
+    return { ...settings.data, ...org.data } as ComplianceSettings;
+  },
+
+  /** Saves settings and Information Officer together; returns the current notice version. */
+  saveComplianceSettings: (s: Omit<ComplianceSettings, 'updated_at'>) =>
+    rpc<Policy>('save_compliance_settings', {
+      p_track_apps: s.track_apps,
+      p_track_window_titles: s.track_window_titles,
+      p_track_web_domains: s.track_web_domains,
+      p_track_full_urls: s.track_full_urls,
+      p_idle_threshold_seconds: s.idle_threshold_seconds,
+      p_allow_pause: s.allow_pause,
+      p_retention_days: s.retention_days,
+      p_summary_retention_days: s.summary_retention_days,
+      p_notice_custom_text: s.notice_custom_text,
+      p_information_officer_name: s.information_officer_name,
+      p_information_officer_email: s.information_officer_email,
+    }),
+
+  policies: async () => {
+    const { data, error } = await supabase
+      .from('monitoring_policies')
+      .select('id,version,notice_text,published_at,published_by')
+      .order('version', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as Policy[];
+  },
+
+  consents: async () => {
+    const { data, error } = await supabase
+      .from('consents')
+      .select('employee_id,policy_id,acknowledged_at,agent_version')
+      .order('acknowledged_at', { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as Consent[];
+  },
+
+  /** Newest first; pass the last id seen to load the next page. */
+  auditLog: async (opts: { beforeId?: number; actions?: string[] } = {}) => {
+    let q = supabase.from('audit_log').select('id,actor_employee_id,action,target_type,target_id,details,created_at');
+    if (opts.beforeId !== undefined) q = q.lt('id', opts.beforeId);
+    if (opts.actions?.length) q = q.in('action', opts.actions);
+    const { data, error } = await q.order('id', { ascending: false }).limit(AUDIT_PAGE);
+    if (error) throw error;
+    return (data ?? []) as AuditEntry[];
+  },
 
   employees: async () => {
     const { data, error } = await supabase
@@ -199,7 +303,8 @@ export const api = {
   },
 
   /** Active/idle segments overlapping [fromIso, toIso), newest first, for one app or one website. */
-  segments: async (employee: string, fromIso: string, toIso: string, filter: { app?: string; domain?: string }) => {
+  segments: async (employee: string, fromIso: string, toIso: string,
+    filter: { app?: string; domain?: string; project?: string | null }) => {
     let q = supabase
       .from('activity_segments')
       .select('started_at,ended_at,state,app_name,window_title,url,domain')
@@ -207,6 +312,7 @@ export const api = {
       .in('state', ['active', 'idle'])
       .lt('started_at', toIso)
       .gt('ended_at', fromIso);
+    if (filter.project) q = q.eq('project_id', filter.project);
     if (filter.domain !== undefined) q = q.eq('domain', filter.domain);
     if (filter.app !== undefined) q = filter.app === 'Unknown' ? q.is('app_name', null) : q.eq('app_name', filter.app);
     const { data, error } = await q.order('started_at', { ascending: false }).limit(SEGMENT_LIMIT);

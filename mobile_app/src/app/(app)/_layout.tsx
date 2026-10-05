@@ -55,6 +55,10 @@ export default function AppLayout() {
         <Stack.Screen name="employee/[id]" options={inner('Employee Details')} />
         <Stack.Screen name="manage/[id]" options={inner('Manage Employee')} />
         <Stack.Screen name="delete-activity" options={inner('Delete Activity')} />
+        <Stack.Screen name="monitoring" options={inner('Monitoring & Privacy')} />
+        <Stack.Screen name="acknowledgements" options={inner('Notice Acknowledgements')} />
+        <Stack.Screen name="notice-history" options={inner('Notice History')} />
+        <Stack.Screen name="audit-log" options={inner('Audit Log')} />
       </Stack.Protected>
       <Stack.Protected guard={!isManager}>
         <Stack.Screen name="me" options={{ title: 'My Activity' }} />

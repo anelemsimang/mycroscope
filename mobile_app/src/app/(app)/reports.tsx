@@ -31,17 +31,21 @@ export default function Reports() {
   const profile = useProfile();
   const [period, setPeriod] = useState<PeriodKey>('this_week');
   const [who, setWho] = useState<string>(ALL);
+  const [project, setProject] = useState<string>(ALL);
   const [exporting, setExporting] = useState<'csv' | 'pdf' | null>(null);
   const range = periodRange(period, todayIn(profile.timezone));
+  const projectId = project === ALL ? null : project;
 
   const employees = useAsync(async () => (await api.employees()).filter((e) => e.auth_user_id), []);
+  const projects = useAsync(() => api.projects(), []);
+  const projectName = projects.data?.find((p) => p.id === projectId)?.name;
   const people = employees.data ?? [];
   const selected = who === ALL ? people.filter((e) => e.is_active) : people.filter((e) => e.id === who);
   const selectedKey = selected.map((e) => e.id).join(',');
 
   const { data, error, loading, refreshing, refresh } = useAsync(async () => {
     const lines = await Promise.all(selected.map(async (employee): Promise<Line> => {
-      const days = await api.dailyTotals(employee.id, range.from, range.to);
+      const days = await api.dailyTotals(employee.id, range.from, range.to, projectId);
       const sum = (k: keyof DailyTotal) => days.reduce((a, d) => a + Number(d[k] ?? 0), 0);
       return {
         employee, days,
@@ -50,19 +54,23 @@ export default function Reports() {
       };
     }));
     return lines.sort((a, b) => b.active - a.active);
-  }, [range.from, range.to, selectedKey]);
+  }, [range.from, range.to, selectedKey, projectId]);
 
   const totals = useMemo(() => (data ?? []).reduce(
     (t, l) => ({ active: t.active + l.active, idle: t.idle + l.idle, paused: t.paused + l.paused }),
     { active: 0, idle: 0, paused: 0 }), [data]);
   const single = who !== ALL ? data?.[0] : undefined;
   const scopeName = single ? single.employee.name : 'Team';
-  const title = `${scopeName} activity · ${PERIOD_LABELS[period]}`;
-  const subtitle = range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`;
+  const title = `${scopeName} activity · ${PERIOD_LABELS[period]}${projectName ? ` · ${projectName}` : ''}`;
+  const subtitle = (range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`)
+    + (projectName ? ` · project ${projectName}` : '');
 
   async function logExport(format: string) {
     await Promise.all((data ?? []).map((l) =>
-      api.logAccess(l.employee.id, 'exported_report', { from: range.from, to: range.to, format, scope: who === ALL ? 'team' : 'employee' })));
+      api.logAccess(l.employee.id, 'exported_report', {
+        from: range.from, to: range.to, format, scope: who === ALL ? 'team' : 'employee',
+        ...(projectId ? { project: projectName ?? projectId } : {}),
+      })));
   }
 
   async function exportCsv() {
@@ -70,12 +78,12 @@ export default function Reports() {
     setExporting('csv');
     try {
       const rows = data.flatMap((l) => l.days.map((d) => [
-        d.day, l.employee.name, l.employee.employee_code, d.active_seconds, d.idle_seconds, d.paused_seconds,
+        d.day, l.employee.name, l.employee.employee_code, projectName ?? 'All projects', d.active_seconds, d.idle_seconds, d.paused_seconds,
         d.away_seconds, (d.active_seconds / 3600).toFixed(2),
       ]));
       await logExport('csv');
-      await shareCsv(`mycroscope_${scopeName}_${range.from}_${range.to}`, toCsv(
-        ['date', 'employee', 'employee_code', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'active_hours'],
+      await shareCsv(`mycroscope_${scopeName}${projectName ? `_${projectName}` : ''}_${range.from}_${range.to}`, toCsv(
+        ['date', 'employee', 'employee_code', 'project', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'active_hours'],
         rows));
     } catch (e) {
       notify('Export failed', errorMessage(e));
@@ -125,6 +133,14 @@ export default function Reports() {
           ...people.map((e) => ({ value: e.id, label: e.is_active ? e.name : `${e.name} (deactivated)` })),
         ]} />
       </Card>
+      {(projects.data?.length ?? 0) > 0 ? (
+        <Card title="Select Project">
+          <Segmented value={project} onChange={setProject} options={[
+            { value: ALL, label: 'All projects' },
+            ...(projects.data ?? []).map((p) => ({ value: p.id, label: p.is_active ? p.name : `${p.name} (archived)` })),
+          ]} />
+        </Card>
+      ) : null}
       <Card title="Select Period">
         <Segmented options={PERIODS} value={period} onChange={setPeriod} />
         <Text style={styles.hint}>{subtitle} · {profile.timezone}</Text>
