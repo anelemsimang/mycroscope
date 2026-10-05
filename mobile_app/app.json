@@ -1,28 +1,41 @@
 {
-  "expo": {
-    "name": "MycroscopeMobile",
-    "slug": "MycroscopeMobile",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": false,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
-  }
+    "expo":  {
+                 "name":  "Mycroscope",
+                 "slug":  "mycroscope",
+                 "version":  "2.0.0",
+                 "scheme":  "mycroscope",
+                 "orientation":  "portrait",
+                 "icon":  "./assets/icon.png",
+                 "userInterfaceStyle":  "light",
+                 "ios":  {
+                             "supportsTablet":  true
+                         },
+                 "android":  {
+                                 "adaptiveIcon":  {
+                                                      "foregroundImage":  "./assets/adaptive-icon.png",
+                                                      "backgroundColor":  "#ffffff"
+                                                  }
+                             },
+                 "web":  {
+                             "favicon":  "./assets/favicon.png",
+                             "bundler":  "metro"
+                         },
+                 "plugins":  [
+                                 "expo-router",
+                                 "expo-sqlite",
+                                 "expo-sharing",
+                                 [
+                                     "expo-splash-screen",
+                                     {
+                                         "image":  "./assets/splash-icon.png",
+                                         "imageWidth":  200,
+                                         "resizeMode":  "contain",
+                                         "backgroundColor":  "#ffffff"
+                                     }
+                                 ]
+                             ],
+                 "experiments":  {
+                                     "typedRoutes":  true
+                                 }
+             }
 }

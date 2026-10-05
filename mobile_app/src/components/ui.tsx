@@ -1,0 +1,229 @@
+import type { PropsWithChildren, ReactNode } from 'react';
+import {
+  ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View,
+  type TextInputProps, type ViewStyle,
+} from 'react-native';
+
+import type { ActivityState } from '@/lib/api';
+
+export const colors = {
+  primary: '#1e3a8a',
+  primaryLight: '#dbeafe',
+  background: '#f5f7fb',
+  card: '#ffffff',
+  text: '#1f2937',
+  muted: '#6b7280',
+  border: '#e5e7eb',
+  danger: '#dc2626',
+  success: '#059669',
+  warning: '#d97706',
+  away: '#9ca3af',
+};
+
+export const stateColor: Record<ActivityState, string> = {
+  active: colors.success,
+  idle: colors.warning,
+  away: colors.away,
+  paused: '#7c3aed',
+  logged_out: colors.away,
+};
+
+export const stateLabel: Record<ActivityState, string> = {
+  active: 'Active',
+  idle: 'Idle',
+  away: 'Away',
+  paused: 'Paused',
+  logged_out: 'Signed out',
+};
+
+export function Screen({ children, refreshing, onRefresh, padded = true }: PropsWithChildren<{
+  refreshing?: boolean; onRefresh?: () => void; padded?: boolean;
+}>) {
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.background }}
+      contentContainerStyle={padded ? { padding: 16, paddingBottom: 40, gap: 12 } : undefined}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} /> : undefined}>
+      {children}
+    </ScrollView>
+  );
+}
+
+export function Card({ children, style, title, right }: PropsWithChildren<{ style?: ViewStyle; title?: string; right?: ReactNode }>) {
+  return (
+    <View style={[styles.card, style]}>
+      {(title || right) && (
+        <View style={styles.cardHeader}>
+          {title ? <Text style={styles.cardTitle}>{title}</Text> : <View />}
+          {right}
+        </View>
+      )}
+      {children}
+    </View>
+  );
+}
+
+export function Button({ title, onPress, variant = 'primary', disabled, loading, small }: {
+  title: string; onPress: () => void; variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
+  disabled?: boolean; loading?: boolean; small?: boolean;
+}) {
+  const bg = { primary: colors.primary, secondary: colors.primaryLight, danger: colors.danger, ghost: 'transparent' }[variant];
+  const fg = variant === 'secondary' || variant === 'ghost' ? colors.primary : '#fff';
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      disabled={disabled || loading}
+      style={({ pressed }) => [
+        styles.button, small && styles.buttonSmall, { backgroundColor: bg, opacity: disabled ? 0.5 : pressed ? 0.8 : 1 },
+      ]}>
+      {loading ? <ActivityIndicator color={fg} /> : <Text style={[styles.buttonText, { color: fg }]}>{title}</Text>}
+    </Pressable>
+  );
+}
+
+export function Field({ label, hint, ...props }: TextInputProps & { label: string; hint?: string }) {
+  return (
+    <View style={{ gap: 4 }}>
+      <Text style={styles.label}>{label}</Text>
+      <TextInput placeholderTextColor={colors.muted} style={styles.input} {...props} />
+      {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+    </View>
+  );
+}
+
+export function ToggleRow({ label, value, onChange, disabled, hint }: {
+  label: string; value: boolean; onChange: (v: boolean) => void; disabled?: boolean; hint?: string;
+}) {
+  return (
+    <View style={styles.toggleRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowText}>{label}</Text>
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+      </View>
+      <Switch value={value} onValueChange={onChange} disabled={disabled} />
+    </View>
+  );
+}
+
+export function Segmented<T extends string>({ options, value, onChange }: {
+  options: { value: T; label: string }[]; value: T; onChange: (v: T) => void;
+}) {
+  return (
+    <View style={styles.segmented}>
+      {options.map((o) => (
+        <Pressable key={o.value} onPress={() => onChange(o.value)}
+          style={[styles.segment, o.value === value && styles.segmentActive]}>
+          <Text style={[styles.segmentText, o.value === value && { color: '#fff' }]}>{o.label}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+export function StateBadge({ state, online = true }: { state: ActivityState | null; online?: boolean }) {
+  const s: ActivityState = !online || !state ? 'logged_out' : state;
+  return (
+    <View style={[styles.badge, { backgroundColor: `${stateColor[s]}22` }]}>
+      <View style={[styles.dot, { backgroundColor: stateColor[s] }]} />
+      <Text style={[styles.badgeText, { color: stateColor[s] }]}>{online ? stateLabel[s] : 'Offline'}</Text>
+    </View>
+  );
+}
+
+export function Pill({ text, color = colors.muted }: { text: string; color?: string }) {
+  return (
+    <View style={[styles.badge, { backgroundColor: `${color}1f` }]}>
+      <Text style={[styles.badgeText, { color }]}>{text}</Text>
+    </View>
+  );
+}
+
+export function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center' }}>
+      <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
+      <Text style={styles.hint}>{label}</Text>
+    </View>
+  );
+}
+
+/** Horizontal bar proportional to value/max. */
+export function BarRow({ label, value, max, right, sub, color = colors.primary }: {
+  label: string; value: number; max: number; right: string; sub?: string; color?: string;
+}) {
+  const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0;
+  return (
+    <View style={{ gap: 4, paddingVertical: 6 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+        <Text style={[styles.rowText, { flex: 1 }]} numberOfLines={1}>{label}</Text>
+        <Text style={styles.rowText}>{right}</Text>
+      </View>
+      {sub ? <Text style={styles.hint} numberOfLines={1}>{sub}</Text> : null}
+      <View style={styles.barTrack}>
+        <View style={[styles.barFill, { width: `${pct}%`, backgroundColor: color }]} />
+      </View>
+    </View>
+  );
+}
+
+/** Stacked bar of active/idle/away/paused seconds. */
+export function StackedBar({ parts, height = 10 }: { parts: { value: number; color: string }[]; height?: number }) {
+  const total = parts.reduce((a, p) => a + p.value, 0);
+  return (
+    <View style={[styles.barTrack, { height, flexDirection: 'row' }]}>
+      {total > 0 && parts.map((p, i) => (
+        <View key={i} style={{ width: `${(p.value / total) * 100}%`, backgroundColor: p.color }} />
+      ))}
+    </View>
+  );
+}
+
+export function Loading() {
+  return <View style={{ padding: 40 }}><ActivityIndicator size="large" color={colors.primary} /></View>;
+}
+
+export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
+  return (
+    <View style={styles.error}>
+      <Text style={{ color: colors.danger, flex: 1 }}>{message}</Text>
+      {onRetry ? <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={onRetry}>Retry</Text> : null}
+    </View>
+  );
+}
+
+export function Empty({ text }: { text: string }) {
+  return <Text style={[styles.hint, { textAlign: 'center', paddingVertical: 16 }]}>{text}</Text>;
+}
+
+export const styles = StyleSheet.create({
+  card: { backgroundColor: colors.card, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.border, gap: 6 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  cardTitle: { fontSize: 15, fontWeight: '700', color: colors.text },
+  button: { borderRadius: 10, paddingVertical: 13, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  buttonSmall: { paddingVertical: 8, paddingHorizontal: 12 },
+  buttonText: { fontSize: 15, fontWeight: '600' },
+  label: { fontSize: 13, fontWeight: '600', color: colors.text },
+  hint: { fontSize: 12, color: colors.muted },
+  input: {
+    borderWidth: 1, borderColor: colors.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 11,
+    fontSize: 15, color: colors.text, backgroundColor: '#fff',
+  },
+  rowText: { fontSize: 14, color: colors.text },
+  title: { fontSize: 22, fontWeight: '800', color: colors.primary },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 },
+  segmented: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  segment: { paddingVertical: 7, paddingHorizontal: 12, borderRadius: 16, backgroundColor: colors.primaryLight },
+  segmentActive: { backgroundColor: colors.primary },
+  segmentText: { color: colors.primary, fontWeight: '600', fontSize: 13 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, alignSelf: 'flex-start' },
+  badgeText: { fontSize: 12, fontWeight: '600' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  statValue: { fontSize: 18, fontWeight: '700', color: colors.text },
+  barTrack: { height: 8, borderRadius: 4, backgroundColor: colors.border, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 4 },
+  error: { flexDirection: 'row', gap: 8, padding: 12, borderRadius: 10, backgroundColor: '#fee2e2' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },
+});
