@@ -37,7 +37,7 @@ export default function AddEmployee() {
     return (
       <Screen>
         <ActivationCard name={name.trim()} org={profile.organizationName} result={result} timezone={profile.timezone} />
-        <Button title="Done" variant="secondary" onPress={() => router.back()} />
+        <Button title="Done" variant="secondary" onPress={() => (router.canGoBack() ? router.back() : router.replace('/employees'))} />
       </Screen>
     );
   }

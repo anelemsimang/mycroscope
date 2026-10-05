@@ -1,8 +1,17 @@
-import { Stack } from 'expo-router';
-import { Text, View } from 'react-native';
+import { Stack, router } from 'expo-router';
+import { Pressable, Text, View } from 'react-native';
 
 import { Button, colors } from '@/components/ui';
 import { useSession } from '@/lib/session';
+
+function BackToList() {
+  return (
+    <Pressable hitSlop={8} style={{ paddingRight: 12 }} accessibilityRole="button" accessibilityLabel="Back to employees"
+      onPress={() => (router.canDismiss() ? router.dismissAll() : router.replace('/'))}>
+      <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>‹ Employees</Text>
+    </Pressable>
+  );
+}
 
 export default function AppLayout() {
   const { profile, isManager, reloadProfile, signOut } = useSession();
@@ -21,8 +30,8 @@ export default function AppLayout() {
     <Stack screenOptions={{ headerTintColor: colors.primary, contentStyle: { backgroundColor: colors.background } }}>
       <Stack.Protected guard={isManager}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="employee/[id]" options={{ title: 'Activity' }} />
-        <Stack.Screen name="manage/[id]" options={{ title: 'Manage employee' }} />
+        <Stack.Screen name="employee/[id]" options={{ title: 'Activity', headerLeft: () => <BackToList /> }} />
+        <Stack.Screen name="manage/[id]" options={{ title: 'Manage employee', headerLeft: () => <BackToList /> }} />
         <Stack.Screen name="add-employee" options={{ title: 'Add employee', presentation: 'modal' }} />
       </Stack.Protected>
       <Stack.Protected guard={!isManager}>
