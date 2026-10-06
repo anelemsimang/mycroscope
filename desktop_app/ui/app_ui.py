@@ -10,9 +10,8 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 from pathlib import Path
-from tkinter.scrolledtext import ScrolledText
 from typing import Any, Callable, Optional
 
 from PIL import Image, ImageDraw
@@ -23,6 +22,8 @@ from config import (APP_NAME, IN_USE_IDLE_SECONDS, REMINDER_INTERVAL_SECONDS, TH
 from core.agent import Agent
 from core.api import ApiError, AuthError, NetworkError
 from core.unattended import UnattendedWatch
+from ui import theme
+from ui.theme import P
 from utils.autostart import mark_stopped_by_user
 from utils.logger import get_logger
 
@@ -89,15 +90,19 @@ class AgentApp:
         self.start_hidden = start_hidden
         self._queue: "queue.Queue[Callable[[], None]]" = queue.Queue()
         _set_app_id()
+        theme.prepare_process(_asset("fonts"))
         self.root = tk.Tk()
         self.root.title(APP_NAME)
         self._set_window_icon()
-        self.root.geometry("460x640")
-        self.root.minsize(420, 560)
-        self.root.configure(bg=C["background"])
+        self.theme = theme.Theme(self.root)
+        px = self.theme.px
+        self.root.geometry(f"{px(470)}x{px(680)}")
+        self.root.minsize(px(430), px(600))
+        self.root.configure(bg=P["page"])
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.protocol("WM_SAVE_YOURSELF", self._on_session_end)
-        self._style()
+        self.theme.apply()
+        self._build_header()
         self.agent = Agent(on_change=lambda kind: self.post(lambda: self._on_agent_change(kind)))
         self.frame: Optional[tk.Frame] = None
         self.status_widgets: dict[str, Any] = {}
@@ -146,28 +151,87 @@ class AgentApp:
     def _show_error(self, exc: Exception) -> None:
         messagebox.showerror(APP_NAME, _error_text(exc), parent=self.root)
 
-    def _style(self) -> None:
-        s = ttk.Style(self.root)
-        s.theme_use("clam")
-        s.configure(".", background=C["background"], foreground=C["text"], font=("Segoe UI", 10))
-        s.configure("TFrame", background=C["background"])
-        s.configure("TLabel", background=C["background"])
-        s.configure("Title.TLabel", font=("Segoe UI", 16, "bold"), foreground=C["primary"])
-        s.configure("Sub.TLabel", foreground=C["text_secondary"])
-        s.configure("Big.TLabel", font=("Segoe UI", 14, "bold"))
-        s.configure("TButton", padding=6)
-        s.configure("Primary.TButton", background=C["primary"], foreground="white")
-        s.map("Primary.TButton", background=[("active", "#1e40af"), ("disabled", "#9ca3af")])
-        s.configure("TCheckbutton", background=C["background"])
-        s.configure("TNotebook", background=C["background"])
+    # ---- layout helpers --------------------------------------------------
+    def _build_header(self) -> None:
+        px = self.theme.px
+        bar = tk.Frame(self.root, bg=P["navy"], height=px(60))
+        bar.pack(side="top", fill="x")
+        bar.pack_propagate(False)
+        self._logo = self.theme.image(_asset("logo-reverse.png"), 28)
+        if self._logo:
+            tk.Label(bar, image=self._logo, bg=P["navy"], bd=0).pack(side="left", padx=px(20))
+        else:
+            tk.Label(bar, text=APP_NAME, bg=P["navy"], fg="white", font=self.theme.font["h2"]).pack(
+                side="left", padx=px(20))
+        self.header_status = tk.Label(bar, text="", bg=P["navy"], fg="#DBEAFE", font=self.theme.font["small"],
+                                      compound="left", padx=px(6), bd=0)
+        self.header_status.pack(side="right", padx=px(16))
+        tk.Frame(self.root, bg=P["cyan"], height=px(3)).pack(side="top", fill="x")
 
-    def _swap(self) -> tk.Frame:
+    def _set_header_status(self, text: str, color: Optional[str] = None) -> None:
+        image = self.theme.dot(color, 8, P["navy"]) if color else ""
+        self.header_status.configure(text=text, image=image)
+
+    def _swap(self) -> ttk.Frame:
         if self.frame is not None:
             self.frame.destroy()
         self.status_widgets = {}
-        self.frame = ttk.Frame(self.root, padding=20)
+        self.frame = ttk.Frame(self.root, style="Page.TFrame", padding=self.theme.px(18))
         self.frame.pack(fill="both", expand=True)
         return self.frame
+
+    def _card(self, parent, expand: bool = False, pady=(0, 0)) -> ttk.Frame:
+        card = self.theme.frame(parent, "Card.TFrame")
+        card.pack(fill="both" if expand else "x", expand=expand, pady=pady)
+        return card
+
+    def _field(self, parent, label: str, show: str = "") -> ttk.Entry:
+        px = self.theme.px
+        ttk.Label(parent, text=label, style="Field.TLabel").pack(anchor="w", pady=(px(10), px(4)))
+        e = ttk.Entry(parent, show=show, font=self.theme.font["body"])
+        e.pack(fill="x")
+        return e
+
+    def _banner(self, parent, text: str) -> None:
+        box = self.theme.frame(parent, "Danger.TFrame")
+        box.pack(fill="x", pady=(0, self.theme.px(12)))
+        ttk.Label(box, text=text, style="Danger.TLabel", wraplength=self.theme.px(360), justify="left").pack(anchor="w")
+
+    def _ask_text(self, title: str, prompt: str) -> Optional[str]:
+        """A themed replacement for simpledialog.askstring."""
+        px = self.theme.px
+        dlg = tk.Toplevel(self.root)
+        dlg.title(title)
+        dlg.configure(bg=P["card"])
+        dlg.resizable(False, False)
+        dlg.transient(self.root)
+        body = ttk.Frame(dlg, padding=px(20))
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=title, style="H2.TLabel").pack(anchor="w")
+        entry = self._field(body, prompt)
+        entry.configure(width=34)
+        result: dict[str, Optional[str]] = {"value": None}
+
+        def done(value: Optional[str]) -> None:
+            result["value"] = value
+            dlg.destroy()
+
+        row = ttk.Frame(body)
+        row.pack(fill="x", pady=(px(18), 0))
+        ttk.Button(row, text="Create", style="Primary.TButton", command=lambda: done(entry.get())).pack(side="right")
+        ttk.Button(row, text="Cancel", command=lambda: done(None)).pack(side="right", padx=(0, px(8)))
+        entry.bind("<Return>", lambda _: done(entry.get()))
+        dlg.bind("<Escape>", lambda _: done(None))
+        dlg.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_width()) // 2
+        y = self.root.winfo_rooty() + px(140)
+        dlg.geometry(f"+{x}+{y}")
+        if self._on_top:
+            dlg.attributes("-topmost", True)
+        entry.focus_set()
+        dlg.grab_set()
+        self.root.wait_window(dlg)
+        return result["value"]
 
     def show_window(self) -> None:
         self.root.deiconify()
@@ -198,8 +262,8 @@ class AgentApp:
         self.root.after(5000, self._watch_tick)
 
     def _set_on_top(self, on_top: bool) -> None:
-        if on_top != self._on_top:
-            self._on_top = on_top
+        self._on_top = on_top
+        if bool(self.root.attributes("-topmost")) != on_top:
             self.root.attributes("-topmost", on_top)
 
     # ---- start -----------------------------------------------------------
@@ -256,36 +320,60 @@ class AgentApp:
         self.run_bg(self.agent.try_restore, on_ok, on_err)
 
     def _show_message(self, text: str) -> None:
+        px = self.theme.px
+        title, _, detail = text.partition("\n")
+        self._set_header_status("")
         f = self._swap()
-        ttk.Label(f, text=APP_NAME, style="Title.TLabel").pack(pady=(60, 10))
-        ttk.Label(f, text=text, style="Sub.TLabel", justify="center").pack()
+        card = self._card(f, expand=True)
+        inner = ttk.Frame(card)
+        inner.place(relx=0.5, rely=0.42, anchor="center")
+        self._spinner_logo = self.theme.image(_asset("mycroscope.png"), 64)
+        if self._spinner_logo:
+            ttk.Label(inner, image=self._spinner_logo).pack(pady=(0, px(18)))
+        ttk.Label(inner, text=title, style="H2.TLabel").pack()
+        if detail:
+            ttk.Label(inner, text=detail, style="Muted.TLabel", justify="center").pack(pady=(px(4), 0))
+        bar = ttk.Progressbar(inner, mode="indeterminate", length=px(180))
+        bar.pack(pady=(px(18), 0))
+        bar.start(12)
 
     # ---- sign in ---------------------------------------------------------
     def show_login(self, message: str = "") -> None:
+        px = self.theme.px
         self.show_window()
+        self._set_header_status("Not signed in", P["faint"])
         f = self._swap()
-        ttk.Label(f, text=APP_NAME, style="Title.TLabel").pack(anchor="w")
-        ttk.Label(f, text="Employee activity agent", style="Sub.TLabel").pack(anchor="w", pady=(0, 10))
+        ttk.Label(f, text="Welcome", style="PageH1.TLabel").pack(anchor="w")
+        ttk.Label(f, text="Sign in to start your work session on this PC.", style="PageMuted.TLabel").pack(
+            anchor="w", pady=(0, px(14)))
+        card = self._card(f)
         if message:
-            ttk.Label(f, text=message, foreground=C["alert"], wraplength=400).pack(anchor="w", pady=(0, 8))
+            self._banner(card, message)
 
-        nb = ttk.Notebook(f)
-        nb.pack(fill="both", expand=True)
-        nb.add(self._sign_in_tab(nb), text="Sign in")
-        nb.add(self._activate_tab(nb), text="Activate account")
+        track = self.theme.frame(card, "Track.TFrame")
+        track.pack(fill="x")
+        content = ttk.Frame(card)
+        content.pack(fill="x")
+        tabs: dict[str, ttk.Button] = {}
 
-    def _field(self, parent, label: str, show: str = "") -> ttk.Entry:
-        ttk.Label(parent, text=label).pack(anchor="w", pady=(8, 2))
-        e = ttk.Entry(parent, show=show, width=40)
-        e.pack(fill="x")
-        return e
+        def show_tab(name: str) -> None:
+            for key, b in tabs.items():
+                b.configure(style="SegOn.TButton" if key == name else "SegOff.TButton")
+            for child in content.winfo_children():
+                child.destroy()
+            (self._sign_in_form if name == "sign_in" else self._activate_form)(content)
 
-    def _sign_in_tab(self, nb) -> ttk.Frame:
-        t = ttk.Frame(nb, padding=12)
+        for key, label in (("sign_in", "Sign in"), ("activate", "Activate account")):
+            tabs[key] = ttk.Button(track, text=label, command=lambda k=key: show_tab(k))
+            tabs[key].pack(side="left", fill="x", expand=True)
+        show_tab("sign_in")
+
+    def _sign_in_form(self, t: ttk.Frame) -> None:
+        px = self.theme.px
         ident = self._field(t, "Email or employee code")
         pw = self._field(t, "Password", show="•")
         btn = ttk.Button(t, text="Sign in", style="Primary.TButton")
-        btn.pack(fill="x", pady=(16, 6))
+        btn.pack(fill="x", pady=(px(20), px(6)))
 
         def submit(_=None):
             if not ident.get().strip() or not pw.get():
@@ -306,21 +394,32 @@ class AgentApp:
 
         btn.configure(command=submit)
         pw.bind("<Return>", submit)
-        ttk.Button(t, text="Forgot password?", command=forgot).pack(anchor="e")
+        ident.bind("<Return>", lambda _: pw.focus_set())
+        ttk.Button(t, text="Forgot password?", style="Link.TButton", command=forgot).pack(anchor="e")
         ident.focus_set()
-        return t
 
-    def _activate_tab(self, nb) -> ttk.Frame:
-        t = ttk.Frame(nb, padding=12)
-        ttk.Label(t, text="First time? Use the employee code and activation code from your manager.",
-                  style="Sub.TLabel", wraplength=380).pack(anchor="w")
-        code = self._field(t, "Employee code")
-        act = self._field(t, "Activation code")
+    def _activate_form(self, t: ttk.Frame) -> None:
+        px = self.theme.px
+        ttk.Label(t, text="First time here? Use the employee code and activation code from your manager.",
+                  style="Muted.TLabel", wraplength=px(360), justify="left").pack(anchor="w", pady=(px(12), 0))
+        codes = ttk.Frame(t)
+        codes.pack(fill="x")
+        left, right = ttk.Frame(codes), ttk.Frame(codes)
+        left.pack(side="left", fill="x", expand=True, padx=(0, px(6)))
+        right.pack(side="left", fill="x", expand=True, padx=(px(6), 0))
+        code = self._field(left, "Employee code")
+        act = self._field(right, "Activation code")
         email = self._field(t, "Your work email")
-        pw = self._field(t, "Choose a password (min. 8 characters)", show="•")
-        pw2 = self._field(t, "Confirm password", show="•")
+        pws = ttk.Frame(t)
+        pws.pack(fill="x")
+        left, right = ttk.Frame(pws), ttk.Frame(pws)
+        left.pack(side="left", fill="x", expand=True, padx=(0, px(6)))
+        right.pack(side="left", fill="x", expand=True, padx=(px(6), 0))
+        pw = self._field(left, "Password (8+ characters)", show="•")
+        pw2 = self._field(right, "Confirm password", show="•")
         btn = ttk.Button(t, text="Activate and sign in", style="Primary.TButton")
-        btn.pack(fill="x", pady=(16, 0))
+        btn.pack(fill="x", pady=(px(20), 0))
+        code.focus_set()
 
         def submit():
             if not all(x.get().strip() for x in (code, act, email, pw)):
@@ -338,7 +437,6 @@ class AgentApp:
                         lambda exc: (btn.state(["!disabled"]), self._show_error(exc)))
 
         btn.configure(command=submit)
-        return t
 
     def _after_sign_in(self) -> None:
         def on_ok(policy):
@@ -357,43 +455,61 @@ class AgentApp:
     # ---- monitoring notice -----------------------------------------------
     def show_notice(self, mode: str) -> None:
         """mode: initial (must acknowledge before tracking), update (new version while tracking), view."""
+        px = self.theme.px
         self.show_window()
         policy = self.agent.policy or {}
         f = self._swap()
         heading = {
-            "initial": "Workplace monitoring notice",
-            "update": "The monitoring notice has changed",
-            "view": "Workplace monitoring notice",
+            "initial": "Monitoring notice",
+            "update": "The notice has changed",
+            "view": "Monitoring notice",
         }[mode]
-        ttk.Label(f, text=heading, style="Title.TLabel").pack(anchor="w")
-        ttk.Label(f, text=f"Version {policy.get('version', '?')} · {self.agent.profile.organization_name}",
-                  style="Sub.TLabel").pack(anchor="w", pady=(0, 8))
-        box = ScrolledText(f, wrap="word", height=18, font=("Segoe UI", 10), relief="solid", borderwidth=1)
-        box.insert("1.0", policy.get("notice_text") or "")
-        box.configure(state="disabled")
-        box.pack(fill="both", expand=True)
+        if mode != "view":
+            self._set_header_status("Waiting for you", P["faint"])
+        ttk.Label(f, text=heading, style="PageH1.TLabel").pack(anchor="w")
+        ttk.Label(f, text=f"{self.agent.profile.organization_name} · version {policy.get('version', '?')}",
+                  style="PageMuted.TLabel").pack(anchor="w", pady=(0, px(12)))
+        card = self._card(f, expand=True)
 
-        buttons = ttk.Frame(f)
-        buttons.pack(fill="x", pady=(10, 0))
+        buttons = ttk.Frame(card)
+        buttons.pack(side="bottom", fill="x", pady=(px(14), 0))
+        reading = ttk.Frame(card)
+        reading.pack(side="top", fill="both", expand=True)
+        box = tk.Text(reading, wrap="word", font=self.theme.font["reading"], relief="flat", bd=0,
+                      bg=P["card"], fg=P["text_soft"], padx=px(2), pady=px(2), spacing1=px(1), spacing3=px(2),
+                      highlightthickness=0, cursor="arrow", height=10)
+        bar = ttk.Scrollbar(reading, orient="vertical", command=box.yview)
+        box.configure(yscrollcommand=bar.set)
+        bar.pack(side="right", fill="y")
+        box.pack(side="left", fill="both", expand=True)
+        box.tag_configure("title", font=self.theme.font["reading_title"], foreground=P["navy"], spacing3=px(8))
+        box.tag_configure("heading", font=self.theme.font["reading_head"], foreground=P["text"],
+                          spacing1=px(12), spacing3=px(3))
+        for i, line in enumerate((policy.get("notice_text") or "").split("\n")):
+            stripped = line.strip()
+            tag = "title" if i == 0 else ("heading" if stripped and stripped.isupper() and len(stripped) < 40 else ())
+            box.insert("end", line + "\n", tag)
+        box.configure(state="disabled")
+
         if mode == "view" and not self.agent.needs_acknowledgement:
             ack_at = policy.get("acknowledged_at") or ""
-            ttk.Label(f, text=f"You acknowledged this notice on {ack_at[:16].replace('T', ' ')} (UTC).",
-                      style="Sub.TLabel").pack(anchor="w", pady=(6, 0))
+            ttk.Label(buttons, text=f"Acknowledged {ack_at[:16].replace('T', ' ')} (UTC)",
+                      style="Muted.TLabel").pack(side="left")
             ttk.Button(buttons, text="Back", command=self.show_status).pack(side="right")
             return
 
         agreed = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="I have read and understood this notice.", variable=agreed,
+        ttk.Checkbutton(card, text="I have read and understood this notice.", variable=agreed,
                         command=lambda: ack.state(["!disabled"] if agreed.get() else ["disabled"])).pack(
-            anchor="w", pady=(8, 0))
+            side="bottom", anchor="w", pady=(px(12), 0))
         ack = ttk.Button(buttons, text="Acknowledge" + (" and start" if mode == "initial" else ""),
                          style="Primary.TButton")
         ack.state(["disabled"])
         ack.pack(side="right")
         if mode == "initial":
-            ttk.Button(buttons, text="Sign out", command=self._sign_out).pack(side="left")
+            ttk.Button(buttons, text="Sign out", command=self._sign_out).pack(side="right", padx=(0, px(8)))
         else:
-            ttk.Button(buttons, text="Later", command=self.show_status).pack(side="left")
+            ttk.Button(buttons, text="Later", command=self.show_status).pack(side="right", padx=(0, px(8)))
 
         def submit():
             ack.state(["disabled"])
@@ -413,47 +529,53 @@ class AgentApp:
         self.run_bg(self.agent.start_tracking, on_ok)
 
     def show_status(self) -> None:
+        px = self.theme.px
         f = self._swap()
         p = self.agent.profile
         w = self.status_widgets
-        ttk.Label(f, text=p.name, style="Title.TLabel").pack(anchor="w")
-        ttk.Label(f, text=f"{p.organization_name} · {p.employee_code}", style="Sub.TLabel").pack(anchor="w")
 
-        w["state"] = ttk.Label(f, text="", style="Big.TLabel")
-        w["state"].pack(anchor="w", pady=(16, 0))
-        w["current"] = ttk.Label(f, text="", style="Sub.TLabel", wraplength=410)
-        w["current"].pack(anchor="w")
+        bottom = ttk.Frame(f, style="Page.TFrame")
+        bottom.pack(side="bottom", fill="x")
+        ttk.Button(bottom, text="Monitoring notice", style="PageLink.TButton",
+                   command=lambda: self.show_notice("view")).pack(side="left")
+        ttk.Button(bottom, text="Sign out", style="PageLink.TButton", command=self._sign_out).pack(side="right")
+        ttk.Label(bottom, text=f"v{VERSION}", style="PageMuted.TLabel").pack(side="left", expand=True)
 
-        today = ttk.LabelFrame(f, text="Today", padding=10)
-        today.pack(fill="x", pady=(14, 0))
+        card = self._card(f)
+        ttk.Label(card, text=p.name, style="H2.TLabel").pack(anchor="w")
+        ttk.Label(card, text=f"{p.organization_name} · {p.employee_code}", style="Muted.TLabel").pack(anchor="w")
+        w["state"] = ttk.Label(card, text="", style="State.TLabel", compound="left")
+        w["state"].pack(anchor="w", pady=(px(12), 0))
+        w["current"] = ttk.Label(card, text="", style="Muted.TLabel", wraplength=px(380))
+        w["current"].pack(anchor="w", pady=(px(2), 0))
+
+        ttk.Label(card, text="TODAY", style="Field.TLabel").pack(anchor="w", pady=(px(12), px(6)))
+        tiles = ttk.Frame(card)
+        tiles.pack(fill="x")
         for i, key in enumerate(("active", "idle", "away", "paused")):
-            ttk.Label(today, text=key.capitalize()).grid(row=0, column=i, padx=8)
-            w[f"t_{key}"] = ttk.Label(today, text="0h 00m", font=("Segoe UI", 11, "bold"))
-            w[f"t_{key}"].grid(row=1, column=i, padx=8)
+            tiles.columnconfigure(i, weight=1, uniform="tile")
+            tile = self.theme.frame(tiles, "Tile.TFrame")
+            tile.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else px(4), 0 if i == 3 else px(4)))
+            w[f"t_{key}"] = ttk.Label(tile, text="0h 00m", style="TileValue.TLabel")
+            w[f"t_{key}"].pack(anchor="w")
+            ttk.Label(tile, text=key.capitalize(), style="Tile.TLabel").pack(anchor="w")
 
-        proj = ttk.LabelFrame(f, text="Project", padding=10)
-        proj.pack(fill="x", pady=(12, 0))
-        w["project"] = ttk.Combobox(proj, state="readonly", width=30)
+        work = self._card(f, pady=(px(12), 0))
+        ttk.Label(work, text="PROJECT", style="Field.TLabel").pack(anchor="w", pady=(0, px(6)))
+        row = ttk.Frame(work)
+        row.pack(fill="x")
+        w["project"] = ttk.Combobox(row, state="readonly", font=self.theme.font["body"])
         w["project"].pack(side="left", fill="x", expand=True)
         w["project"].bind("<<ComboboxSelected>>", self._on_project_selected)
-        ttk.Button(proj, text="New…", command=self._new_project).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="New", command=self._new_project).pack(side="left", padx=(px(8), 0))
         self._fill_projects()
+        w["pause"] = ttk.Button(work, command=self._toggle_pause)
+        w["pause"].pack(fill="x", pady=(px(10), 0))
 
-        w["pause"] = ttk.Button(f, command=self._toggle_pause)
-        w["pause"].pack(fill="x", pady=(12, 0))
-
-        w["sync"] = ttk.Label(f, text="", style="Sub.TLabel")
-        w["sync"].pack(anchor="w", pady=(12, 0))
-
-        w["tracked"] = ttk.Label(f, text="", style="Sub.TLabel", wraplength=410, justify="left")
-        w["tracked"].pack(anchor="w", pady=(6, 0))
-
-        bottom = ttk.Frame(f)
-        bottom.pack(side="bottom", fill="x")
-        ttk.Button(bottom, text="Monitoring notice", command=lambda: self.show_notice("view")).pack(side="left")
-        ttk.Button(bottom, text="Sign out", command=self._sign_out).pack(side="right")
-        ttk.Label(f, text=f"v{VERSION} · closing this window keeps tracking in the tray",
-                  style="Sub.TLabel").pack(side="bottom", anchor="w", pady=(0, 6))
+        w["sync"] = ttk.Label(f, text="", style="PageMuted.TLabel", compound="left")
+        w["sync"].pack(anchor="w", pady=(px(10), 0))
+        w["tracked"] = ttk.Label(f, text="", style="PageMuted.TLabel", wraplength=px(420), justify="left")
+        w["tracked"].pack(anchor="w", pady=(px(6), 0))
         self._refresh_status()
 
     def _tracked_description(self) -> str:
@@ -477,10 +599,9 @@ class AgentApp:
         else:
             when = "While you are signed in, Mycroscope records "
             outside = ""
-        extra = " It also checks that it keeps running and that input is from a person." if s.detect_tampering else ""
+        extra = " Integrity checks are on." if s.detect_tampering else ""
         return (when + ", ".join(items) + "." + outside +
-                " Your manager can see this. It never records keystrokes, screenshots or file contents." + extra +
-                " It starts automatically when you sign in to Windows; signing out stops tracking.")
+                " Never keystrokes, screenshots or file contents." + extra)
 
     def _refresh_status(self) -> None:
         w = self.status_widgets
@@ -489,7 +610,8 @@ class AgentApp:
         live = self.agent.live_status()
         state = live.get("state", "logged_out")
         label, color = STATE_LABELS.get(state, (state, C["text"]))
-        w["state"].configure(text=label, foreground=color)
+        w["state"].configure(text="  " + label, image=self.theme.dot(color, 12))
+        self._set_header_status(label.split(" (")[0].split(" —")[0], color)
         current = ""
         if state == "active":
             parts = [x for x in (live.get("app_name"), live.get("domain")) if x]
@@ -505,12 +627,12 @@ class AgentApp:
         pending = self.agent.pending_uploads()
         online = self.agent.online
         if online is False:
-            sync = f"Offline — {pending} item(s) saved on this PC, will upload automatically"
+            sync, dot = f"Offline: {pending} item(s) saved on this PC, will upload automatically", C["warning"]
         elif pending > 2:
-            sync = f"Uploading… {pending} item(s) waiting"
+            sync, dot = f"Uploading… {pending} item(s) waiting", P["cyan"]
         else:
-            sync = "Connected · data up to date"
-        w["sync"].configure(text=sync)
+            sync, dot = "Connected · data up to date", C["success"]
+        w["sync"].configure(text="  " + sync, image=self.theme.dot(dot, 8, P["page"]))
         w["tracked"].configure(text=self._tracked_description())
         self._update_tray(state)
         self.root.after(2000, self._refresh_status)
@@ -530,7 +652,7 @@ class AgentApp:
         self.agent.set_project(pid)
 
     def _new_project(self) -> None:
-        name = simpledialog.askstring(APP_NAME, "New project name:", parent=self.root)
+        name = self._ask_text("New project", "Project name")
         if not name or not name.strip():
             return
 

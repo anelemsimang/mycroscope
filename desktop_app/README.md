@@ -45,6 +45,8 @@ copy .env.example .env      # then fill in SUPABASE_URL and SUPABASE_KEY (anon/p
 - **Integrity checks** (if the organisation turns them on; all listed in the notice): gaps where the agent
   was not running while the PC was awake during working hours, virtual machines, remote desktop sessions,
   and machine-like input rhythms (mouse jigglers). These raise alerts for managers; they never block work.
+- **Look:** brand colours and the Poppins font (bundled in `assets/fonts`, SIL Open Font License, `OFL.txt`);
+  the window theme is in `ui/theme.py`.
 - **Data and logs:** `%LOCALAPPDATA%\Mycroscope` (`agent.db`, `logs\agent.log`). Sign-in tokens are encrypted
   with Windows DPAPI for the signed-in user.
 
