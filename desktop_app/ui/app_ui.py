@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import ttk
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -149,7 +149,9 @@ class AgentApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _show_error(self, exc: Exception) -> None:
-        messagebox.showerror(APP_NAME, _error_text(exc), parent=self.root)
+        title = ("Can't connect" if isinstance(exc, NetworkError) else
+                 "Sign-in problem" if isinstance(exc, AuthError) else "Something went wrong")
+        self._message("error", title, _error_text(exc))
 
     # ---- layout helpers --------------------------------------------------
     def _build_header(self) -> None:
@@ -197,20 +199,80 @@ class AgentApp:
         box.pack(fill="x", pady=(0, self.theme.px(12)))
         ttk.Label(box, text=text, style="Danger.TLabel", wraplength=self.theme.px(360), justify="left").pack(anchor="w")
 
-    def _ask_text(self, title: str, prompt: str) -> Optional[str]:
-        """A themed replacement for simpledialog.askstring."""
-        px = self.theme.px
+    # ---- dialogs ---------------------------------------------------------
+    def _modal(self) -> tuple[tk.Toplevel, ttk.Frame, dict]:
         dlg = tk.Toplevel(self.root)
-        dlg.title(title)
+        dlg.withdraw()
+        dlg.title(APP_NAME)
         dlg.configure(bg=P["card"])
         dlg.resizable(False, False)
         dlg.transient(self.root)
-        body = ttk.Frame(dlg, padding=px(20))
+        body = ttk.Frame(dlg, padding=self.theme.px(22))
         body.pack(fill="both", expand=True)
+        return dlg, body, {"value": None}
+
+    def _run_modal(self, dlg: tk.Toplevel, result: dict, focus: tk.Widget) -> Any:
+        if self.root.state() in ("iconic", "withdrawn"):
+            self.show_window()
+        dlg.update_idletasks()
+        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_reqwidth()) // 2
+        y = self.root.winfo_rooty() + self.theme.px(150)
+        dlg.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        dlg.deiconify()
+        if self._on_top:
+            dlg.attributes("-topmost", True)
+        dlg.lift()
+        focus.focus_set()
+        try:
+            dlg.grab_set()
+        except tk.TclError:
+            pass
+        self.root.wait_window(dlg)
+        return result["value"]
+
+    def _message(self, kind: str, title: str, text: str,
+                 buttons: tuple = (("OK", True, "Primary.TButton"),)) -> Any:
+        """Themed message box. buttons: (label, value, style), left to right; the last is the default."""
+        px = self.theme.px
+        dlg, body, result = self._modal()
+
+        def done(value: Any) -> None:
+            result["value"] = value
+            dlg.destroy()
+
+        top = ttk.Frame(body)
+        top.pack(fill="x")
+        ttk.Label(top, image=self.theme.badge(kind, _asset("fonts") / "Poppins-SemiBold.ttf")).pack(
+            side="left", anchor="n", padx=(0, px(14)))
+        texts = ttk.Frame(top)
+        texts.pack(side="left", fill="x", expand=True)
+        ttk.Label(texts, text=title, style="H2.TLabel").pack(anchor="w")
+        ttk.Label(texts, text=text, wraplength=px(300), justify="left", foreground=P["text_soft"]).pack(
+            anchor="w", pady=(px(4), 0))
+
+        row = ttk.Frame(body)
+        row.pack(fill="x", pady=(px(20), 0))
+        widgets = []
+        for label, value, style in reversed(buttons):
+            b = ttk.Button(row, text=label, style=style, command=lambda v=value: done(v))
+            b.pack(side="right", padx=(px(8), 0))
+            widgets.append(b)
+        default_value, cancel_value = buttons[-1][1], buttons[0][1] if len(buttons) > 1 else buttons[-1][1]
+        dlg.bind("<Return>", lambda _: done(default_value))
+        dlg.bind("<Escape>", lambda _: done(cancel_value))
+        dlg.protocol("WM_DELETE_WINDOW", lambda: done(cancel_value))
+        return self._run_modal(dlg, result, widgets[0])
+
+    def _confirm(self, title: str, text: str, yes: str, danger: bool = False) -> bool:
+        return bool(self._message("question", title, text, (
+            ("Cancel", False, "TButton"), (yes, True, "Danger.TButton" if danger else "Primary.TButton"))))
+
+    def _ask_text(self, title: str, prompt: str) -> Optional[str]:
+        px = self.theme.px
+        dlg, body, result = self._modal()
         ttk.Label(body, text=title, style="H2.TLabel").pack(anchor="w")
         entry = self._field(body, prompt)
         entry.configure(width=34)
-        result: dict[str, Optional[str]] = {"value": None}
 
         def done(value: Optional[str]) -> None:
             result["value"] = value
@@ -222,16 +284,7 @@ class AgentApp:
         ttk.Button(row, text="Cancel", command=lambda: done(None)).pack(side="right", padx=(0, px(8)))
         entry.bind("<Return>", lambda _: done(entry.get()))
         dlg.bind("<Escape>", lambda _: done(None))
-        dlg.update_idletasks()
-        x = self.root.winfo_rootx() + (self.root.winfo_width() - dlg.winfo_width()) // 2
-        y = self.root.winfo_rooty() + px(140)
-        dlg.geometry(f"+{x}+{y}")
-        if self._on_top:
-            dlg.attributes("-topmost", True)
-        entry.focus_set()
-        dlg.grab_set()
-        self.root.wait_window(dlg)
-        return result["value"]
+        return self._run_modal(dlg, result, entry)
 
     def show_window(self) -> None:
         self.root.deiconify()
@@ -385,12 +438,13 @@ class AgentApp:
 
         def forgot():
             if not ident.get().strip():
-                messagebox.showinfo(APP_NAME, "Enter your email or employee code first.", parent=self.root)
+                self._message("info", "Who are you?", "Enter your email or employee code first, then tap "
+                                                      "\"Forgot password?\" again.")
                 return
             self.run_bg(lambda: self.agent.request_password_reset(ident.get()),
-                        lambda _: messagebox.showinfo(
-                            APP_NAME, "If that account exists, a password reset email has been sent.",
-                            parent=self.root))
+                        lambda _: self._message(
+                            "info", "Check your email",
+                            "If that account exists, we've sent a link to reset your password."))
 
         btn.configure(command=submit)
         pw.bind("<Return>", submit)
@@ -423,13 +477,13 @@ class AgentApp:
 
         def submit():
             if not all(x.get().strip() for x in (code, act, email, pw)):
-                messagebox.showwarning(APP_NAME, "Please fill in every field.", parent=self.root)
+                self._message("warning", "Some details are missing", "Please fill in every field.")
                 return
             if len(pw.get()) < 8:
-                messagebox.showwarning(APP_NAME, "The password must be at least 8 characters.", parent=self.root)
+                self._message("warning", "Password too short", "The password must be at least 8 characters.")
                 return
             if pw.get() != pw2.get():
-                messagebox.showwarning(APP_NAME, "The passwords don't match.", parent=self.root)
+                self._message("warning", "Passwords don't match", "Type the same password in both boxes.")
                 return
             btn.state(["disabled"])
             self.run_bg(lambda: self.agent.activate(code.get(), act.get(), email.get(), pw.get()),
@@ -668,7 +722,8 @@ class AgentApp:
             self._show_error(exc)
 
     def _sign_out(self) -> None:
-        if not messagebox.askyesno(APP_NAME, "Sign out and stop tracking on this PC?", parent=self.root):
+        if not self._confirm("Sign out?", "Tracking stops on this PC until someone signs in again.",
+                             "Sign out", danger=True):
             return
         self._show_message("Signing out…")
         self.run_bg(self.agent.sign_out, lambda _: self.show_login(),

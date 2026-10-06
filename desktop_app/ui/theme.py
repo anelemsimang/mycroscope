@@ -12,7 +12,7 @@ from pathlib import Path
 from tkinter import font as tkfont, ttk
 from typing import Optional
 
-from PIL import Image, ImageDraw, ImageTk
+from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 P = {
     "navy": "#1E3A8A", "navy_hover": "#1E40AF", "navy_deep": "#172554",
@@ -21,6 +21,8 @@ P = {
     "border": "#E2E8F0", "border_strong": "#CBD5E1",
     "text": "#0F172A", "text_soft": "#334155", "muted": "#64748B", "faint": "#94A3B8",
     "danger": "#B91C1C", "danger_bg": "#FEF2F2", "danger_border": "#FECACA",
+    "danger_solid": "#DC2626", "warning": "#D97706", "warning_bg": "#FFFBEB", "info_bg": "#ECFEFF",
+    "navy_bg": "#EFF6FF",
     "disabled": "#CBD5E1",
 }
 
@@ -93,6 +95,31 @@ class Theme:
             self._dots[key] = self._photo(_rounded(s, s, s // 2, color, bg))
         return self._dots[key]
 
+    def badge(self, kind: str, font_file: Path) -> ImageTk.PhotoImage:
+        """Round icon for dialogs: error, warning, info or question."""
+        key = ("badge", kind)
+        if key in self._dots:
+            return self._dots[key]
+        glyph, fg, bg = {
+            "error": ("!", P["danger_solid"], P["danger_bg"]),
+            "warning": ("!", P["warning"], P["warning_bg"]),
+            "info": ("i", P["cyan_dark"], P["info_bg"]),
+            "question": ("?", P["navy"], P["navy_bg"]),
+        }[kind]
+        size, ss = self.px(44), 4
+        img = Image.new("RGBA", (size * ss, size * ss), P["card"])
+        d = ImageDraw.Draw(img)
+        d.ellipse((0, 0, size * ss - 1, size * ss - 1), fill=bg)
+        inner = size * ss * 0.22
+        d.ellipse((inner, inner, size * ss - 1 - inner, size * ss - 1 - inner), fill=fg)
+        try:
+            font = ImageFont.truetype(str(font_file), int(size * ss * 0.36))
+        except OSError:
+            font = ImageFont.load_default()
+        d.text((size * ss / 2, size * ss / 2), glyph, fill="white", font=font, anchor="mm")
+        self._dots[key] = self._photo(img.resize((size, size), Image.LANCZOS))
+        return self._dots[key]
+
     def image(self, path: Path, height: int) -> Optional[ImageTk.PhotoImage]:
         try:
             img = Image.open(path).convert("RGBA")
@@ -134,6 +161,8 @@ class Theme:
             s.configure(name, background=bg, foreground=fg, font=font)
 
         self._button(s, "Primary.TButton", P["card"], fill=(P["navy"], P["navy_hover"], P["navy_deep"], P["disabled"]),
+                     fg=("white", "white"))
+        self._button(s, "Danger.TButton", P["card"], fill=(P["danger_solid"], P["danger"], "#991B1B", P["disabled"]),
                      fg=("white", "white"))
         self._button(s, "TButton", P["card"], fill=("#FFFFFF", P["tile"], P["track"], "#FFFFFF"),
                      fg=(P["text"], P["faint"]), outline=P["border_strong"])
