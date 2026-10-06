@@ -10,6 +10,14 @@ Mycroscope desktop agent - installing on employee PCs
        release\                 Mycroscope-<version>.zip + manifest.json for auto-updates
    Sign builds you ship: see the top of build.ps1 (SIGN_CERT_THUMBPRINT or SIGN_PFX_PATH).
 
+1b. One-click installer for non-technical testers (recommended): after build.ps1, run
+       powershell -ExecutionPolicy Bypass -File build-installer.ps1
+    This needs Inno Setup 6 (https://jrsoftware.org/isdl.php) and reads SUPABASE_URL/SUPABASE_KEY from
+    dist\agent.env (or .env). It produces dist\Mycroscope-Setup.exe - a single file you send to testers.
+    They double-click it, enter the company install key (checked online), and the agent installs for their user
+    and starts. Uninstall is through Windows Settings -> Apps. Unsigned builds show a SmartScreen warning
+    ("More info -> Run anyway") until you code-sign (see build.ps1).
+
 2. In dist, copy .env.example to agent.env and fill in SUPABASE_URL and SUPABASE_KEY
    (Supabase -> Project Settings -> API, the anon/public key - never the service_role key), and INSTALL_KEY
    (the company install key from the manager app -> Settings -> Organisation). The installer checks the key.
