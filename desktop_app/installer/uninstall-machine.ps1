@@ -7,6 +7,9 @@ $ErrorActionPreference = 'Continue'
 foreach ($name in 'Agent', 'Watchdog', 'Updater') {
     Unregister-ScheduledTask -TaskPath '\Mycroscope\' -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
 }
+# Best effort: tell the managers this PC is being removed (uses the PC's existing report key).
+$exe = Join-Path (Join-Path $env:ProgramFiles 'Mycroscope') 'Mycroscope.exe'
+if (Test-Path $exe) { try { & $exe --report-uninstall 2>$null | Out-Null } catch {} }
 Get-Process Mycroscope -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 Remove-Item (Join-Path $env:ProgramFiles 'Mycroscope') -Recurse -Force -ErrorAction SilentlyContinue

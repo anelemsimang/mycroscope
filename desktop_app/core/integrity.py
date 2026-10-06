@@ -17,6 +17,7 @@ from utils.logger import get_logger
 log = get_logger("integrity")
 
 AGENT_GAP_MINUTES = 10
+LATE_START_MINUTES = 15
 SAME_BOOT_TOLERANCE_SECONDS = 120
 VM_MARKERS = ("vmware", "virtualbox", "vbox", "qemu", "kvm", "xen", "parallels", "virtual machine",
               "bochs", "bhyve", "amazon ec2", "google compute engine")
@@ -73,6 +74,31 @@ def detect_gap(previous: Optional[dict[str, Any]], now: datetime, boot: datetime
     return {
         "minutes": round(awake_gap / 60),
         "since": prev_wall.astimezone(timezone.utc).isoformat(),
+        "until": now.astimezone(timezone.utc).isoformat(),
+    }
+
+
+def detect_late_start(previous: Optional[dict[str, Any]], now: datetime, boot: datetime, awake: float
+                      ) -> Optional[dict[str, Any]]:
+    """Details of a tracking_late event: the agent started well into a new boot.
+
+    The agent has run on this PC before (there is a heartbeat), the PC has since rebooted, and the agent only
+    started after the machine had already been awake for a while. That is the signature of removing the agent,
+    restarting, using the PC, then reinstalling. A prompt start right after boot (the normal logon task) is fine.
+    """
+    if not previous:
+        return None
+    try:
+        prev_boot = datetime.fromisoformat(previous["boot"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if abs((prev_boot - boot).total_seconds()) <= SAME_BOOT_TOLERANCE_SECONDS:
+        return None  # same boot: a mid-session gap is reported by detect_gap instead
+    if awake < LATE_START_MINUTES * 60:
+        return None
+    return {
+        "minutes": round(awake / 60),
+        "since": (now - timedelta(seconds=awake)).astimezone(timezone.utc).isoformat(),
         "until": now.astimezone(timezone.utc).isoformat(),
     }
 

@@ -11,7 +11,8 @@ Mycroscope desktop agent - installing on employee PCs
    Sign builds you ship: see the top of build.ps1 (SIGN_CERT_THUMBPRINT or SIGN_PFX_PATH).
 
 2. In dist, copy .env.example to agent.env and fill in SUPABASE_URL and SUPABASE_KEY
-   (Supabase -> Project Settings -> API, the anon/public key - never the service_role key).
+   (Supabase -> Project Settings -> API, the anon/public key - never the service_role key), and INSTALL_KEY
+   (the company install key from the manager app -> Settings -> Organisation). The installer checks the key.
    Optionally set WEB_APP_URL to the web app's address so password-reset emails open its reset page.
 
 3a. Company-managed PCs (recommended): as administrator, or from Intune / GPO / your RMM tool, run
@@ -27,7 +28,7 @@ Mycroscope desktop agent - installing on employee PCs
    - Remove with uninstall-machine.ps1 (as administrator).
 
 3b. Personal or unmanaged PCs: signed in as the employee, run
-       powershell -ExecutionPolicy Bypass -File install.ps1
+       powershell -ExecutionPolicy Bypass -File install.ps1 [-InstallKey MYC-XXXX-XXXX-XXXX-XXXX]
 
    - Installs to %LOCALAPPDATA%\Programs\Mycroscope (no admin rights needed); config in
      %LOCALAPPDATA%\Mycroscope\agent.env. The employee can uninstall it; the manager sees that the PC

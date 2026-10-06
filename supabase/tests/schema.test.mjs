@@ -753,6 +753,56 @@ test('the sign-in reminder migration republishes every notice without changing s
   assert.equal(status.acknowledged, false, 'employees are asked to acknowledge the new version');
 });
 
+test('install key: shown to managers, verified anonymously, rotated by the owner', async () => {
+  const key = (await asUser(ctx.ownerAuth, 'select get_install_key() as k')).rows[0].k;
+  assert.match(key, /^MYC-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/);
+  const mgrKey = (await asUser(ctx.mgrAuth, 'select get_install_key() as k')).rows[0].k;
+  assert.equal(mgrKey, key, 'managers see the same key');
+  const empKey = (await asUser(ctx.empAuth, 'select get_install_key() as k')).rows[0].k;
+  assert.equal(empKey, null, 'employees do not get the install key');
+  await rejects(asAnon('select get_install_key()'), /permission denied/);
+
+  const verified = (await asAnon('select * from verify_install_key($1)', [key.toLowerCase()])).rows;
+  assert.equal(verified.length, 1, 'the key is accepted case-insensitively');
+  assert.equal(verified[0].organization_name, 'Acme Logistics');
+  assert.equal((await asAnon('select * from verify_install_key($1)', ['MYC-WRON-GKEY-0000-0000'])).rows.length, 0);
+
+  await rejects(asUser(ctx.mgrAuth, 'select rotate_install_key()'), /Only the owner/);
+  const newKey = (await asUser(ctx.ownerAuth, 'select rotate_install_key() as k')).rows[0].k;
+  assert.notEqual(newKey, key);
+  assert.equal((await asAnon('select * from verify_install_key($1)', [key])).rows.length, 0, 'the old key stops working');
+  assert.equal((await asAnon('select * from verify_install_key($1)', [newKey])).rows.length, 1);
+});
+
+test('uninstalling and starting late raise manager alerts', async () => {
+  const reportKey = 'u'.repeat(43);
+  await asUser(ctx.empAuth, 'select set_device_report_key($1, $2)', [ctx.deviceId, reportKey]);
+
+  assert.equal((await asAnon('select report_uninstalled($1, $2) as ok', [ctx.deviceId, 'wrong-key'])).rows[0].ok, false);
+  assert.equal((await asAnon('select report_uninstalled($1, $2) as ok', [ctx.deviceId, reportKey])).rows[0].ok, true);
+  assert.equal((await asAnon('select report_uninstalled($1, $2) as ok', [ctx.deviceId, reportKey])).rows[0].ok, true);
+  const events = await db.query(
+    `select count(*)::int as n from agent_events where device_id = $1 and event_type = 'agent_uninstalled'`, [ctx.deviceId]);
+  assert.equal(events.rows[0].n, 1, 'repeat reports within 10 minutes do not pile up');
+
+  await asUser(ctx.empAuth, `
+    insert into agent_events (id, organization_id, employee_id, device_id, occurred_at, event_type, details)
+    values ($1, $2, $3, $4, now() - interval '2 minutes', 'tracking_late', '{"minutes": 90}')`,
+    [randomUUID(), ctx.orgId, ctx.empId, ctx.deviceId]);
+
+  const alerts = await asUser(ctx.ownerAuth, `select kind, severity from get_integrity_alerts(now() - interval '1 day')
+                                              where kind in ('agent_uninstalled', 'tracking_late') order by kind`);
+  assert.deepEqual(alerts.rows, [
+    { kind: 'agent_uninstalled', severity: 'high' },
+    { kind: 'tracking_late', severity: 'medium' },
+  ]);
+  const emailed = await asRole('service_role', null, () => db.query(
+    `select coalesce(sum(alerts), 0)::int as a, coalesce(sum(high_alerts), 0)::int as h
+     from email_alert_batch(now() - interval '1 day') where organization_name = 'Acme Logistics'`));
+  assert.ok(emailed.rows[0].a >= 2, 'both appear in the alert email batch');
+  assert.ok(emailed.rows[0].h >= 1, 'the uninstall counts as a high alert');
+});
+
 test('deleting an employee removes their data and is audited', async () => {
   await rejects(asUser(ctx.ownerAuth, 'select delete_employee($1, $2)', [ctx.ownerId, 'x']), /owner account/);
   await asUser(ctx.ownerAuth, 'select delete_employee($1, $2)', [ctx.empId, 'Left the company']);

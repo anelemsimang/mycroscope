@@ -58,6 +58,8 @@ export function AccountPanel() {
           ) : null}
           <LinkRow title="Subscription & billing" subtitle="Plan, seats and payments"
             onPress={() => router.push('/billing')} />
+          <LinkRow title="Agent install key" subtitle="The key needed to install Mycroscope on a PC"
+            onPress={() => router.push('/install-key')} />
           {profile.role === 'owner' ? (
             <LinkRow title="Support access" subtitle="Let Mycroscope support see technical status for a limited time"
               onPress={() => router.push('/support-access')} />

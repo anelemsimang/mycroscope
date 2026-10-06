@@ -31,6 +31,7 @@ if MACHINE_INSTALL:
 SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip().rstrip("/")
 SUPABASE_KEY = (os.getenv("SUPABASE_KEY") or "").strip()
 WEB_APP_URL = (os.getenv("WEB_APP_URL") or "").strip().rstrip("/")
+INSTALL_KEY = (os.getenv("INSTALL_KEY") or "").strip()
 
 LOCAL_DB_FILE = DATA_DIR / "agent.db"
 CREDENTIALS_FILE = DATA_DIR / "session.bin"

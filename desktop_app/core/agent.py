@@ -311,6 +311,17 @@ class Agent:
             return
         log.info("Reported %d minutes of use with nobody signed in (accepted=%s)", minutes, accepted)
 
+    def report_uninstall(self) -> None:
+        """Best-effort note to the server, with the PC's report key, that the agent is being removed."""
+        device_id, key = self.store.get("unattended:device"), self.store.get("unattended:key")
+        if not device_id or not key:
+            return
+        try:
+            self.api.rpc_anon("report_uninstalled", {"p_device": device_id, "p_key": key})
+            log.info("Reported agent uninstall")
+        except (NetworkError, ApiError) as exc:
+            log.info("Could not report uninstall: %s", exc)
+
     def _close_stale_sessions(self) -> None:
         for sess in self.store.open_sessions(self.profile.employee_id):
             end = self.store.last_segment_end(sess["id"]) or sess["started_at"]
@@ -376,9 +387,13 @@ class Agent:
         self._write_heartbeat(now)
         if not self.settings.detect_tampering:
             return
-        gap = integrity.detect_gap(previous, now, integrity.boot_time(now), integrity.awake_seconds())
+        boot, awake = integrity.boot_time(now), integrity.awake_seconds()
+        gap = integrity.detect_gap(previous, now, boot, awake)
         if gap and self.settings.schedule.overlaps(datetime.fromisoformat(gap["since"]), now):
             self.sync.record_event("agent_gap", gap, at=now)
+        late = integrity.detect_late_start(previous, now, boot, awake)
+        if late and self.settings.schedule.overlaps(datetime.fromisoformat(late["since"]), now):
+            self.sync.record_event("tracking_late", late, at=now)
         vendor = integrity.virtual_machine_vendor()
         if vendor:
             self.sync.record_event("vm_detected", {"vendor": vendor}, at=now)

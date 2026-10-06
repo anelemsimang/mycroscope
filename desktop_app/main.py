@@ -60,6 +60,16 @@ def main(argv: list[str]) -> int:
     if "--uninstall-autostart" in argv:
         autostart.uninstall()
         return 0
+    if "--report-uninstall" in argv:
+        if SUPABASE_URL and SUPABASE_KEY:
+            try:
+                from core.agent import Agent
+                agent = Agent(on_change=lambda *_: None)
+                agent.report_uninstall()
+                agent.store.close()
+            except Exception:
+                log.exception("Uninstall report failed")
+        return 0
 
     sys.excepthook = _log_unhandled
     threading.excepthook = lambda args: _log_unhandled(args.exc_type, args.exc_value, args.exc_traceback)

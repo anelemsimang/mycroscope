@@ -522,6 +522,10 @@ export const api = {
 
   // ---- alerts ----------------------------------------------------------------
   integrityAlerts: (sinceIso: string) => rpc<IntegrityAlert[]>('get_integrity_alerts', { p_since: sinceIso }),
+
+  // ---- agent install key -----------------------------------------------------
+  installKey: () => rpc<string>('get_install_key'),
+  rotateInstallKey: () => rpc<string>('rotate_install_key'),
 };
 
 /** Functions only platform operators (the SaaS provider, signed in with two-factor) may call. */

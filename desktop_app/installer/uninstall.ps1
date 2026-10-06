@@ -7,6 +7,9 @@ $target = Join-Path $env:LOCALAPPDATA 'Programs\Mycroscope'
 
 schtasks /Delete /TN "Mycroscope Agent" /F 2>$null | Out-Null
 schtasks /Delete /TN "Mycroscope Agent Watchdog" /F 2>$null | Out-Null
+# Best effort: tell the managers this PC is being removed (uses the PC's existing report key).
+$exe = Join-Path $target 'Mycroscope.exe'
+if (Test-Path $exe) { try { & $exe --report-uninstall 2>$null | Out-Null } catch {} }
 Get-Process Mycroscope -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 Remove-Item $target -Recurse -Force -ErrorAction SilentlyContinue

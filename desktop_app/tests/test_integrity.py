@@ -76,6 +76,30 @@ class GapTests(unittest.TestCase):
         self.assertIsNone(integrity.detect_gap(None, later, self.boot, 9000))
 
 
+class LateStartTests(unittest.TestCase):
+    boot = datetime(2026, 10, 5, 6, 0, tzinfo=UTC)
+    then = datetime(2026, 10, 5, 8, 0, tzinfo=UTC)
+
+    def hb(self):
+        return integrity.heartbeat(self.then, self.boot, 7200.0, False)
+
+    def test_removed_rebooted_used_then_reinstalled(self):
+        # New boot an hour later; the agent only starts after the PC has been awake 90 minutes.
+        new_boot = self.boot + timedelta(hours=5)
+        start = new_boot + timedelta(minutes=90)
+        late = integrity.detect_late_start(self.hb(), start, new_boot, 90 * 60)
+        self.assertEqual(late["minutes"], 90)
+
+    def test_normal_starts_are_not_late(self):
+        new_boot = self.boot + timedelta(hours=5)
+        prompt = new_boot + timedelta(seconds=20)
+        self.assertIsNone(integrity.detect_late_start(self.hb(), prompt, new_boot, 20), "started right after a reboot")
+        same = self.then + timedelta(minutes=90)
+        self.assertIsNone(integrity.detect_late_start(self.hb(), same, self.boot + timedelta(seconds=3), 7200 + 90 * 60),
+                          "same boot is a gap, not a late start")
+        self.assertIsNone(integrity.detect_late_start(None, same, self.boot, 9000), "first ever run")
+
+
 class EnvironmentTests(unittest.TestCase):
     def test_vm_vendor(self):
         self.assertEqual(integrity.virtual_machine_vendor(["innotek GmbH", "VirtualBox"]), "VirtualBox")

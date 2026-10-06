@@ -9,10 +9,31 @@ param(
     [string]$SupabaseUrl,
     [string]$SupabaseKey,
     [string]$WebAppUrl,
+    [string]$InstallKey,
     [string]$UpdateManifestUrl,
     [string]$UpdateSignerThumbprint
 )
 $ErrorActionPreference = 'Stop'
+
+function Test-InstallKey($url, $anon, $key) {
+    if (-not $key) { throw 'No install key. Pass -InstallKey (the company install key from the manager app).' }
+    try {
+        $resp = Invoke-RestMethod -Method Post -Uri "$($url.TrimEnd('/'))/rest/v1/rpc/verify_install_key" `
+            -Headers @{ apikey = $anon; Authorization = "Bearer $anon"; 'Content-Type' = 'application/json' } `
+            -Body (@{ p_key = $key } | ConvertTo-Json) -TimeoutSec 15
+    } catch {
+        Write-Warning "Could not check the install key online ($($_.Exception.Message)); continuing with the key as given."
+        return
+    }
+    if (-not $resp -or @($resp).Count -eq 0) { throw 'That install key is not valid. Check it in the manager app (Settings -> Organisation).' }
+    Write-Host "Install key verified for $(@($resp)[0].organization_name)."
+}
+
+function Get-EnvVal($lines, $name) {
+    $match = $lines | Where-Object { $_ -match "^\s*$name\s*=" } | Select-Object -First 1
+    if ($match) { return ($match -replace "^\s*$name\s*=\s*", '').Trim() }
+    return $null
+}
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -51,6 +72,8 @@ if ($SupabaseUrl -and $SupabaseKey) {
 } else {
     throw "No configuration: pass -SupabaseUrl and -SupabaseKey, or put agent.env next to this script."
 }
+if ($InstallKey) { $lines = @($lines | Where-Object { $_ -notmatch '^\s*INSTALL_KEY\s*=' }) + "INSTALL_KEY=$InstallKey" }
+Test-InstallKey (Get-EnvVal $lines 'SUPABASE_URL') (Get-EnvVal $lines 'SUPABASE_KEY') (Get-EnvVal $lines 'INSTALL_KEY')
 if ($UpdateManifestUrl) { $lines += "UPDATE_MANIFEST_URL=$UpdateManifestUrl" }
 if ($UpdateSignerThumbprint) { $lines += "UPDATE_SIGNER_THUMBPRINT=$($UpdateSignerThumbprint -replace '\s', '')" }
 [IO.File]::WriteAllText($envFile, (($lines -join "`r`n") + "`r`n"), $utf8)
