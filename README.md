@@ -180,6 +180,39 @@ It rebuilds `daily_usage` as one row per person, day, app and website (so websit
 rules) and back-fills it from stored activity. Reports cover at most 400 days per request. Only tracked computer time
 is counted, so meetings and work away from the computer are not included in any of these figures.
 
+`20261016090000_alerts_and_integrations.sql` (apply after the one above) adds:
+- **Alert rules** (Standard and up; manager app -> Alerts -> Alert rules): an alert when someone uses a website
+  (the domain and its subdomains) or program you name. Suggested lists add file-sharing sites, personal email and
+  Bluetooth file transfer (`fsquirt.exe`). Rules are checked on the server as activity arrives, so they work with
+  every agent version, but only for what is recorded (Websites / Applications switched on). An alert shows a visit,
+  not an upload.
+- **File activity** (Business and up; Monitoring & privacy -> File activity, off by default): with agent 2.3, USB
+  drive, external disk and phone connections, and the names and sizes of files copied to removable drives, cloud
+  sync folders (OneDrive, Dropbox, Google Drive) and, optionally, network drives. File contents are never read.
+  Switching it on publishes a new notice version, and the agent only starts once the employee has acknowledged it.
+  File names are kept for 30 days by default (7 to 365), are only visible on the employee's page behind
+  "Show file activity", and every view is audited. Alerts, Slack/Teams and the API only carry counts. Files copied
+  onto a phone cannot be seen (only that it was connected); on network drives only files owned by the employee's
+  Windows account are counted.
+- **Slack, Microsoft Teams and webhooks** (Standard and up; Alerts -> Slack, Teams & API): new alerts are posted
+  hourly with the alert emails. Saved addresses are never shown again in the app. Webhook requests carry
+  `X-Mycroscope-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the signing secret>`; the
+  secret is shown once when the webhook is added.
+- **Read-only API** (Business and up): keys are shown once and stored hashed. Send `X-Api-Key: myc_...` to
+  `https://<project>.supabase.co/functions/v1/api/v1/` + `employees`, `daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD`,
+  `usage?from=...&to=...` (at most 93 days) or `alerts?since=<ISO time>`.
+
+Deploy the functions (alerts to Slack/Teams/webhooks also need the section 7 cron job, even without Resend):
+
+```powershell
+supabase functions deploy notify-managers --no-verify-jwt
+supabase functions deploy channel-test
+supabase functions deploy api --no-verify-jwt
+```
+
+`channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
+Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.
+
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.
 

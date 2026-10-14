@@ -746,7 +746,7 @@ test('plans decide which features an organisation gets; trials get everything', 
   await db.query(`update subscriptions set plan = 'trial' where organization_id = $1`, [ctx.orgId]);
   assert.ok((await features()).includes('goals'));
   await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
-  assert.deepEqual(await features(), ['team_categories', 'team_schedules', 'trends']);
+  assert.deepEqual(await features(), ['team_categories', 'team_schedules', 'trends', 'alert_rules', 'channels']);
   await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)'), /not included in your plan/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
   await rejects(asAnon('select get_my_features()'), /permission denied/);
@@ -959,6 +959,210 @@ test('analytics: trends, workload, capacity and software usage', async () => {
   await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
   await asUser(ctx.ownerAuth, `select * from get_trend('2026-10-05', '2026-10-11')`);
   await rejects(asUser(ctx.ownerAuth, `select * from get_workload('2026-10-05', '2026-10-11')`), /not included in your plan/);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
+test('alert rules raise policy alarms from incoming activity', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await rejects(asUser(ctx.mgrAuth, `select save_alert_rule(null, 'X', 'domain', 'x.com', 'low', false, true)`), /Not allowed/);
+  await rejects(asUser(ctx.empAuth, `select add_alert_rule_pack('file_sharing')`), /Not allowed/);
+
+  const added = (await asUser(ctx.ownerAuth, `select add_alert_rule_pack('file_sharing') as n`)).rows[0].n;
+  assert.equal(added, 20);
+  assert.equal((await asUser(ctx.ownerAuth, `select add_alert_rule_pack('file_sharing') as n`)).rows[0].n, 0, 'adding a list twice adds nothing');
+  await asUser(ctx.ownerAuth, `select add_alert_rule_pack('bluetooth')`);
+  const bet = (await asUser(ctx.ownerAuth,
+    `select * from save_alert_rule(null, 'Betting', 'domain', 'https://www.Bet.co.za/sports?x=1', 'high', false, true)`)).rows[0];
+  assert.equal(bet.pattern, 'bet.co.za');
+  await rejects(asUser(ctx.ownerAuth, `select save_alert_rule(null, 'Again', 'domain', 'bet.co.za', 'low', false, true)`), /already a rule/);
+  const torrent = (await asUser(ctx.ownerAuth,
+    `select * from save_alert_rule(null, 'Torrents', 'app', '*torrent*', 'high', true, true)`)).rows[0];
+  assert.equal((await asUser(ctx.empAuth, 'select count(*)::int as n from alert_rules')).rows[0].n, 0, 'employees do not see the rules');
+  assert.ok((await asUser(ctx.mgrAuth, 'select count(*)::int as n from alert_rules')).rows[0].n > 20, 'managers see them');
+
+  const device = randomUUID();
+  await db.query('insert into devices (id, organization_id, employee_id, hostname) values ($1, $2, $3, $4)',
+    [device, ctx.orgId, ctx.empId, 'LAPTOP-04']);
+  const seg = async (from, to, app, process, domain) => {
+    const id = randomUUID();
+    await db.query(
+      `insert into activity_segments (id, organization_id, employee_id, device_id, state, started_at, ended_at, app_name,
+         process_name, domain, updated_at)
+       values ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $9, $6)`,
+      [id, ctx.orgId, ctx.empId, device, minutesAgo(from), minutesAgo(to), app, process, domain]);
+    return id;
+  };
+  const betSeg = await seg(40, 39, 'Google Chrome', 'chrome.exe', 'sports.bet.co.za');
+  await seg(39, 38, 'Google Chrome', 'chrome.exe', 'wetransfer.com');
+  await seg(38, 37, 'uTorrent', 'uTorrent.exe', null);
+  await seg(37, 36, 'Bluetooth File Transfer', 'fsquirt.exe', null);
+  await seg(36, 35, 'Google Chrome', 'chrome.exe', 'notbet.co.za');
+
+  const alerts = async () => (await asUser(ctx.ownerAuth,
+    `select kind, severity, details from get_integrity_alerts(now() - interval '1 hour') where kind = 'policy_violation'`)).rows;
+  const byRule = Object.fromEntries((await alerts()).map((a) => [a.details.rule, a]));
+  assert.equal(byRule.Betting.severity, 'high');
+  assert.deepEqual(byRule.Betting.details.matched, ['sports.bet.co.za']);
+  assert.equal(byRule.Betting.details.seconds, 60);
+  assert.equal(byRule['File sharing: WeTransfer'].severity, 'medium');
+  assert.equal(byRule['Bluetooth file transfer'].severity, 'medium');
+  assert.equal(Object.keys(byRule).filter((r) => r === 'Betting').length, 1, 'notbet.co.za is not bet.co.za');
+  const workTime = (await db.query('select is_employee_work_time($1, $2) as w', [ctx.empId, minutesAgo(38)])).rows[0].w;
+  assert.equal(Boolean(byRule.Torrents), workTime, 'work-hours-only rules follow the person\'s working hours');
+
+  await db.query(`update activity_segments set state = 'idle' where id = $1`, [betSeg]);
+  assert.ok(!(await alerts()).some((a) => a.details.rule === 'Betting'), 'time relabelled idle is not a violation');
+  await asUser(ctx.ownerAuth, `select save_alert_rule($1, 'Torrents', 'app', '*torrent*', 'high', false, false)`, [torrent.id]);
+  await seg(30, 29, 'qBittorrent', 'qbittorrent.exe', null);
+  assert.ok(!(await alerts()).some((a) => a.details.rule === 'Torrents' && a.details.matched.includes('qBittorrent')),
+    'disabled rules do not match');
+  assert.equal((await asUser(ctx.empAuth, `select count(*)::int as n from get_integrity_alerts(now() - interval '1 hour')`)).rows[0].n, 0);
+  await rejects(asUser(ctx.ownerAuth, `select org_alerts($1, now(), false)`, [ctx.orgId]), /permission denied/);
+  await asUser(ctx.ownerAuth, 'select delete_alert_rule($1)', [torrent.id]);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
+test('file activity: plan, notice, uploads, audited viewing, alerts and retention', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  const save = (uid, settings) => asUser(uid, `select version from save_compliance_settings($1, 'Thandi Owner', 'privacy@acme.co.za')`,
+    [JSON.stringify(settings)]);
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await rejects(save(ctx.ownerAuth, { detect_removable_media: true }), /not included in your plan/);
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+
+  const device = (await db.query(`select id from devices where hostname = 'LAPTOP-04'`)).rows[0].id;
+  const upload = (row) => asUser(ctx.empAuth,
+    `insert into file_events (id, organization_id, employee_id, device_id, occurred_at, event_type, destination, label,
+       file_name, file_count, size_bytes) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [randomUUID(), ctx.orgId, ctx.empId, device, row.at ?? minutesAgo(5), row.type, row.dest, row.label ?? null,
+     row.file ?? null, row.count ?? 1, row.size ?? null]);
+  await rejects(upload({ type: 'drive_connected', dest: 'removable', label: 'KINGSTON' }), /row-level security/,
+    'nothing is accepted while detection is off');
+
+  await save(ctx.ownerAuth, { detect_removable_media: true, detect_cloud_sync: true, file_retention_days: 14 });
+  const notice = (await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()')).rows[0];
+  assert.match(notice.notice_text, /USB drive, external disk or phone is connected/);
+  assert.match(notice.notice_text, /new files in OneDrive, Dropbox and Google Drive folders/);
+  assert.doesNotMatch(notice.notice_text, /copy to network drives/);
+  assert.match(notice.notice_text, /Names and sizes of copied files are deleted after 14 days\./);
+  assert.equal(notice.settings.detect_removable_media, true);
+  assert.equal(notice.settings.detect_network_drives, false);
+
+  await upload({ type: 'drive_connected', dest: 'removable', label: 'KINGSTON' });
+  await upload({ type: 'file_copied', dest: 'removable', label: 'KINGSTON', file: 'Q3 payroll.xlsx', size: 2048 });
+  await upload({ type: 'file_copied', dest: 'cloud', label: 'OneDrive', file: 'notes.docx', size: 100 });
+  await upload({ type: 'phone_connected', dest: 'phone', label: 'Galaxy A52' });
+  await rejects(upload({ type: 'file_copied', dest: 'network', label: '\\\\srv\\share', file: 'a.txt' }), /row-level security/,
+    'network drives are off');
+  await rejects(upload({ type: 'file_copied', dest: 'phone', file: 'a.txt' }), /check constraint|violates/);
+  await rejects(asUser(ctx.empAuth, 'select * from file_events'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, 'select * from file_events'), /permission denied/);
+
+  const auditCount = async () => (await db.query(
+    `select count(*)::int as n from audit_log where action = 'file_activity_viewed' and target_id = $1`, [ctx.empId])).rows[0].n;
+  const audits = await auditCount();
+  const viewed = await asUser(ctx.ownerAuth,
+    `select event_type, file_name, hostname from get_file_activity($1, now() - interval '1 day', now() + interval '1 hour')`, [ctx.empId]);
+  assert.equal(viewed.rows.length, 4);
+  assert.ok(viewed.rows.some((r) => r.file_name === 'Q3 payroll.xlsx' && r.hostname === 'LAPTOP-04'));
+  assert.equal(await auditCount(), audits + 1, 'each view is recorded in the audit log');
+  await asUser(ctx.empAuth, `select * from get_file_activity($1, now() - interval '1 day', now())`, [ctx.empId]);
+  assert.equal(await auditCount(), audits + 1, 'people looking at their own activity are not audited');
+  await asUser(ctx.mgrAuth, `select * from get_file_activity($1, now() - interval '1 day', now())`, [ctx.empId]);
+  await rejects(asUser(ctx.otherOwnerAuth, `select * from get_file_activity($1, now() - interval '1 day', now())`, [ctx.empId]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth, `select * from get_file_activity($1, now() - interval '200 days', now())`, [ctx.empId]), /at most 93 days/);
+
+  const fileAlerts = async () => (await asUser(ctx.ownerAuth,
+    `select kind, severity, details from get_integrity_alerts(now() - interval '1 hour')
+     where kind in ('device_connected', 'files_copied') order by kind, severity`)).rows;
+  let rows = await fileAlerts();
+  assert.deepEqual(rows.map((r) => [r.kind, r.severity, r.details.destination]).sort(), [
+    ['device_connected', 'medium', 'removable'], ['device_connected', 'medium', 'phone'], ['files_copied', 'medium', 'removable'],
+  ].sort(), 'one cloud file is not an alert');
+  await upload({ type: 'file_copied', dest: 'removable', label: 'KINGSTON', count: 60, size: 10_000_000 });
+  rows = await fileAlerts();
+  const copied = rows.find((r) => r.kind === 'files_copied');
+  assert.equal(copied.severity, 'high');
+  assert.equal(copied.details.files, 61);
+
+  await db.query(
+    `insert into file_events (id, organization_id, employee_id, device_id, occurred_at, event_type, destination, label)
+     values ($1, $2, $3, $4, now() - interval '20 days', 'drive_connected', 'removable', 'OLD')`,
+    [randomUUID(), ctx.orgId, ctx.empId, device]);
+  await db.query('select run_nightly_maintenance()');
+  assert.equal((await db.query(`select count(*)::int as n from file_events where label = 'OLD'`)).rows[0].n, 0,
+    'file activity is kept for file_retention_days');
+  assert.equal((await db.query(`select count(*)::int as n from file_events where label = 'KINGSTON'`)).rows[0].n, 3);
+
+  await save(ctx.ownerAuth, { detect_removable_media: false, detect_cloud_sync: false });
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
+test('Slack, Teams and webhook channels; read-only API keys', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  const svc = (sql, params = []) => asRole('service_role', null, () => db.query(sql, params));
+  const add = (uid, kind, url, sev = 'medium') =>
+    asUser(uid, `select * from add_notification_channel($1, $2, $3, $4)`, [kind, `${kind} alerts`, url, sev]);
+
+  await rejects(add(ctx.mgrAuth, 'slack', 'https://hooks.slack.com/services/T0/B0/x'), /Not allowed/);
+  await rejects(add(ctx.ownerAuth, 'slack', 'https://evil.example.com/services/x'), /Slack incoming webhook/);
+  await rejects(add(ctx.ownerAuth, 'teams', 'https://hooks.slack.com/services/x'), /Teams/);
+  for (const bad of ['http://example.com/hook', 'https://10.0.0.1/hook', 'https://localhost/hook', 'https://nas.local/hook',
+    'https://user@example.com/hook']) {
+    await rejects(add(ctx.ownerAuth, 'webhook', bad), /public https address/, bad);
+  }
+  const slack = (await add(ctx.ownerAuth, 'slack', 'https://hooks.slack.com/services/T000/B000/SECRETPART')).rows[0];
+  assert.equal(slack.signing_secret, null);
+  await add(ctx.ownerAuth, 'teams', 'https://prod-01.westeurope.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?sig=x', 'high');
+  const hook = (await add(ctx.ownerAuth, 'webhook', 'https://example.com/mycroscope')).rows[0];
+  assert.match(hook.signing_secret, /^whsec_[0-9a-f]{48}$/);
+
+  const listed = (await asUser(ctx.ownerAuth, 'select * from list_notification_channels()')).rows;
+  assert.equal(listed.length, 3);
+  assert.ok(!JSON.stringify(listed).includes('SECRETPART'), 'saved addresses are not shown again');
+  assert.equal(listed[0].url_hint, 'hooks.slack.com/…PART');
+  await rejects(asUser(ctx.ownerAuth, 'select * from notification_channels'), /permission denied/);
+  await rejects(asUser(ctx.mgrAuth, 'select * from list_notification_channels()'), /Not allowed/);
+  assert.equal((await asUser(ctx.ownerAuth, 'select request_channel_test($1) as ok', [slack.id])).rows[0].ok, true);
+  await rejects(asUser(ctx.mgrAuth, 'select request_channel_test($1)', [slack.id]), /Not allowed/);
+
+  const batch = (await svc(`select * from channel_alert_batch(now() - interval '1 hour')`)).rows;
+  assert.equal(batch.length, 3);
+  const slackBatch = batch.find((b) => b.kind === 'slack');
+  assert.equal(slackBatch.url, 'https://hooks.slack.com/services/T000/B000/SECRETPART');
+  assert.ok(slackBatch.alerts.every((a) => ['medium', 'high'].includes(a.severity)));
+  assert.ok(batch.find((b) => b.kind === 'teams').alerts?.every((a) => a.severity === 'high') ?? true);
+  assert.equal(batch.find((b) => b.kind === 'webhook').signing_secret, hook.signing_secret);
+  await rejects(asUser(ctx.ownerAuth, `select * from channel_alert_batch(now())`), /permission denied/);
+  await svc('select record_channel_result($1, $2)', [slack.id, 'HTTP 404']);
+  assert.equal((await asUser(ctx.ownerAuth, 'select last_error from list_notification_channels() where id = $1', [slack.id])).rows[0].last_error, 'HTTP 404');
+  await asUser(ctx.ownerAuth, `select update_notification_channel($1, 'Slack', 'high', false)`, [slack.id]);
+  assert.equal((await svc(`select count(*)::int as n from channel_alert_batch(now() - interval '1 hour')`)).rows[0].n, 2,
+    'switched-off channels get nothing');
+
+  await rejects(asUser(ctx.mgrAuth, `select * from create_api_key('Power BI')`), /Not allowed/);
+  const key = (await asUser(ctx.ownerAuth, `select * from create_api_key('Power BI')`)).rows[0];
+  assert.match(key.api_key, /^myc_[0-9a-f]{48}$/);
+  const keys = (await asUser(ctx.ownerAuth, 'select * from list_api_keys()')).rows;
+  assert.equal(keys[0].key_prefix, key.api_key.slice(0, 12));
+  assert.ok(!JSON.stringify(keys).includes(key.api_key), 'the key is shown only once');
+  await rejects(asUser(ctx.ownerAuth, 'select * from api_keys'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, 'select api_authenticate($1)', [key.api_key]), /permission denied/);
+  assert.equal((await svc('select api_authenticate($1) as org', [key.api_key])).rows[0].org, ctx.orgId);
+  assert.equal((await svc('select api_authenticate($1) as org', [`myc_${'0'.repeat(48)}`])).rows[0].org, null);
+  const totals = (await svc(`select * from api_daily_totals($1, '2026-10-06', '2026-10-06')`, [ctx.orgId])).rows;
+  assert.equal(Number(totals.find((r) => r.employee_id === ctx.empId).productive_seconds), 14400);
+  await rejects(svc(`select * from api_usage($1, '2026-01-01', '2026-10-06')`, [ctx.orgId]), /at most 93 days/);
+  assert.ok((await svc(`select count(*)::int as n from api_employees($1)`, [ctx.orgId])).rows[0].n >= 3);
+
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  assert.equal((await svc('select api_authenticate($1) as org', [key.api_key])).rows[0].org, null, 'the plan must include the API');
+  await rejects(asUser(ctx.ownerAuth, `select * from create_api_key('Excel')`), /not included in your plan/);
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await asUser(ctx.ownerAuth, 'select revoke_api_key($1)', [key.id]);
+  assert.equal((await svc('select api_authenticate($1) as org', [key.api_key])).rows[0].org, null, 'revoked keys stop working');
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 

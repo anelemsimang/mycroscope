@@ -1,12 +1,24 @@
-// Weekly digest and integrity-alert emails, called by pg_cron. Deploy with --no-verify-jwt.
+// Weekly digest and alert emails, plus Slack / Teams / webhook alerts; called by pg_cron. Deploy with --no-verify-jwt.
 // Secrets: CRON_SECRET, RESEND_API_KEY, EMAIL_FROM (e.g. "Mycroscope <alerts@mail.example.co.za>"), APP_URL.
+// Channels are posted to even when email is not configured.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { type ChannelAlert, deliver } from '../_shared/alerts.ts';
 import { timingSafeEqual } from '../_shared/billing.ts';
 import { type AlertRow, type DigestRow, type Email, renderAlert, renderDigest } from '../_shared/email.ts';
 import { env, json } from '../_shared/http.ts';
 
 const BATCH = 100;
+
+interface ChannelBatchRow {
+  channel_id: string;
+  kind: 'slack' | 'teams' | 'webhook';
+  url: string;
+  signing_secret: string | null;
+  organization_name: string;
+  timezone: string;
+  alerts: ChannelAlert[] | null;
+}
 
 async function send(emails: Email[], apiKey: string, from: string): Promise<{ sent: number; failed: number }> {
   let sent = 0;
@@ -36,7 +48,6 @@ Deno.serve(async (req) => {
 
   const apiKey = env('RESEND_API_KEY');
   const from = env('EMAIL_FROM');
-  if (!apiKey || !from) return json({ error: 'Email is not configured (RESEND_API_KEY, EMAIL_FROM)' }, 503);
   const appUrl = (env('APP_URL') ?? '').replace(/\/+$/, '');
 
   let kind: unknown;
@@ -46,6 +57,9 @@ Deno.serve(async (req) => {
     kind = undefined;
   }
   if (kind !== 'digest' && kind !== 'alerts') return json({ error: 'kind must be "digest" or "alerts"' }, 400);
+  if (kind === 'digest' && (!apiKey || !from)) {
+    return json({ error: 'Email is not configured (RESEND_API_KEY, EMAIL_FROM)' }, 503);
+  }
 
   const admin = createClient(env('SUPABASE_URL')!, env('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -65,6 +79,26 @@ Deno.serve(async (req) => {
     if (error) return json({ error: error.message }, 500);
     emails = ((data ?? []) as AlertRow[]).map((r) => renderAlert(r, appUrl));
   }
-  const result = await send(emails, apiKey, from);
-  return json({ kind, since, recipients: emails.length, ...result });
+  const result = apiKey && from ? await send(emails, apiKey, from) : { sent: 0, failed: 0, email: 'not configured' };
+
+  const channels = { posted: 0, failed: 0 };
+  if (kind === 'alerts') {
+    const { data, error } = await admin.rpc('channel_alert_batch', { p_since: since });
+    if (error) {
+      console.error('channel_alert_batch failed', error.message);
+    } else {
+      for (const c of (data ?? []) as ChannelBatchRow[]) {
+        if (!c.alerts?.length) continue;
+        const failure = await deliver(c, c.alerts, appUrl);
+        await admin.rpc('record_channel_result', { p_id: c.channel_id, p_error: failure });
+        if (failure) {
+          channels.failed++;
+          console.error('Channel delivery failed', c.channel_id, failure);
+        } else {
+          channels.posted++;
+        }
+      }
+    }
+  }
+  return json({ kind, since, recipients: emails.length, ...result, channels });
 });

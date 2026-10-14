@@ -7,6 +7,9 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 export const isConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
+/** Base address of the read-only REST API (the "api" edge function). */
+export const apiBaseUrl = `${supabaseUrl.replace(/\/+$/, '')}/functions/v1/api/v1`;
+
 export const supabase = createClient(supabaseUrl || 'http://not-configured.invalid', supabaseAnonKey || 'missing', {
   auth: {
     storage: localStorage,

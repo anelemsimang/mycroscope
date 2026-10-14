@@ -111,6 +111,10 @@ export interface ComplianceSettings {
   work_end: string;
   flag_after_hours_use: boolean;
   detect_tampering: boolean;
+  detect_removable_media: boolean;
+  detect_cloud_sync: boolean;
+  detect_network_drives: boolean;
+  file_retention_days: number;
   require_mfa: boolean;
   information_officer_name: string | null;
   information_officer_email: string | null;
@@ -119,7 +123,8 @@ export interface ComplianceSettings {
 
 const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track_full_urls,idle_threshold_seconds,' +
   'allow_pause,retention_days,summary_retention_days,notice_custom_text,tracking_schedule,work_days,work_start,' +
-  'work_end,flag_after_hours_use,detect_tampering,require_mfa,updated_at';
+  'work_end,flag_after_hours_use,detect_tampering,detect_removable_media,detect_cloud_sync,detect_network_drives,' +
+  'file_retention_days,require_mfa,updated_at';
 
 export type ServiceLevel = 'full' | 'read_only';
 export interface ServiceStatus {
@@ -148,7 +153,29 @@ export type Category = 'productive' | 'neutral' | 'unproductive';
 export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category; team_id: string | null }
 
 /** Plan features (see plan_features in the database). */
-export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage';
+export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage'
+  | 'alert_rules' | 'channels' | 'file_activity' | 'api';
+
+export type Severity = 'low' | 'medium' | 'high';
+export interface AlertRule {
+  id: string; name: string; kind: 'domain' | 'app'; pattern: string; severity: Severity;
+  work_hours_only: boolean; enabled: boolean; pack: string | null;
+}
+export type RulePack = 'file_sharing' | 'personal_email' | 'bluetooth';
+export type ChannelKind = 'slack' | 'teams' | 'webhook';
+export interface NotificationChannel {
+  id: string; kind: ChannelKind; name: string; url_hint: string; min_severity: Severity; enabled: boolean;
+  created_at: string; last_sent_at: string | null; last_error: string | null; last_error_at: string | null;
+}
+export interface ApiKey {
+  id: string; name: string; key_prefix: string; created_at: string; last_used_at: string | null;
+  revoked_at: string | null; created_by_name: string | null;
+}
+export interface FileEvent {
+  id: string; occurred_at: string; event_type: 'drive_connected' | 'phone_connected' | 'file_copied';
+  destination: 'removable' | 'phone' | 'cloud' | 'network'; label: string | null; file_name: string | null;
+  file_count: number; size_bytes: number | null; hostname: string | null;
+}
 
 export interface WorkSchedule {
   id: string;
@@ -671,6 +698,59 @@ export const api = {
   /** team null = the company average. A null salary removes it. */
   setWorkforceCost: (team: string | null, annualSalary: number | null) =>
     rpc<void>('set_workforce_cost', { p_team: team, p_annual_salary: annualSalary }),
+
+  // ---- alert rules (owners and managers not limited to teams change them) -----
+  alertRules: async () => {
+    const { data, error } = await supabase.from('alert_rules')
+      .select('id,name,kind,pattern,severity,work_hours_only,enabled,pack').order('name');
+    if (error) throw error;
+    return (data ?? []) as AlertRule[];
+  },
+  saveAlertRule: (r: Omit<AlertRule, 'id' | 'pack'> & { id: string | null }) =>
+    rpc<AlertRule>('save_alert_rule', {
+      p_id: r.id, p_name: r.name, p_kind: r.kind, p_pattern: r.pattern, p_severity: r.severity,
+      p_work_hours_only: r.work_hours_only, p_enabled: r.enabled,
+    }),
+  deleteAlertRule: (id: string) => rpc<void>('delete_alert_rule', { p_id: id }),
+  /** Returns how many rules were added (ones already there are kept as they are). */
+  addAlertRulePack: (pack: RulePack) => rpc<number>('add_alert_rule_pack', { p_pack: pack }),
+
+  // ---- Slack / Teams / webhook channels (the address is never sent back) -------
+  channels: () => rpc<NotificationChannel[]>('list_notification_channels'),
+  /** The signing secret (webhooks only) is shown once. */
+  addChannel: async (kind: ChannelKind, name: string, url: string, minSeverity: Severity) =>
+    (await rpc<{ id: string; signing_secret: string | null }[]>('add_notification_channel', {
+      p_kind: kind, p_name: name, p_url: url, p_min_severity: minSeverity,
+    }))[0],
+  updateChannel: (id: string, name: string, minSeverity: Severity, enabled: boolean) =>
+    rpc<void>('update_notification_channel', { p_id: id, p_name: name, p_min_severity: minSeverity, p_enabled: enabled }),
+  deleteChannel: (id: string) => rpc<void>('delete_notification_channel', { p_id: id }),
+  /** Sends a test message; throws with the reason when the channel did not accept it. */
+  testChannel: async (id: string): Promise<void> => {
+    const { error } = await supabase.functions.invoke('channel-test', { body: { channel_id: id } });
+    if (error) {
+      const ctx = (error as { context?: Response }).context;
+      let message = 'The test could not be sent. Try again later.';
+      try {
+        const body = ctx ? await ctx.json() : null;
+        if (body?.error) message = body.error;
+      } catch { /* keep the generic message */ }
+      throw new Error(message);
+    }
+  },
+
+  // ---- read-only API keys -------------------------------------------------------
+  apiKeys: () => rpc<ApiKey[]>('list_api_keys'),
+  /** The key itself is shown once. */
+  createApiKey: async (name: string) => (await rpc<{ id: string; api_key: string }[]>('create_api_key', { p_name: name }))[0],
+  revokeApiKey: (id: string) => rpc<void>('revoke_api_key', { p_id: id }),
+
+  // ---- file activity (every view by someone other than the person is audited) ---
+  fileActivity: async (employee: string, fromIso: string, toIso: string) =>
+    nullableNumeric(
+      numeric(await rpc<FileEvent[]>('get_file_activity', { p_employee: employee, p_from: fromIso, p_to: toIso }), ['file_count']),
+      ['size_bytes'],
+    ),
 };
 
 /** Functions only platform operators (the SaaS provider, signed in with two-factor) may call. */

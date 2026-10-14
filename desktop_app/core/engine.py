@@ -43,6 +43,9 @@ class TrackingSettings:
     allow_pause: bool = True
     flag_after_hours_use: bool = False
     detect_tampering: bool = False
+    detect_removable_media: bool = False
+    detect_cloud_sync: bool = False
+    detect_network_drives: bool = False
     schedule: Schedule = field(default_factory=Schedule)
 
     @classmethod
@@ -67,6 +70,9 @@ class TrackingSettings:
             allow_pause=self.allow_pause or a.allow_pause,
             flag_after_hours_use=self.flag_after_hours_use and a.flag_after_hours_use,
             detect_tampering=self.detect_tampering and a.detect_tampering,
+            detect_removable_media=self.detect_removable_media and a.detect_removable_media,
+            detect_cloud_sync=self.detect_cloud_sync and a.detect_cloud_sync,
+            detect_network_drives=self.detect_network_drives and a.detect_network_drives,
             schedule=self.schedule.narrowed_to(acknowledged.schedule if acknowledged else None),
         )
 

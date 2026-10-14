@@ -75,6 +75,8 @@ export default function AppLayout() {
         <Stack.Screen name="notice-history" options={inner('Notice History')} />
         <Stack.Screen name="audit-log" options={inner('Audit Log')} />
         <Stack.Screen name="alerts" options={inner('Alerts')} />
+        <Stack.Screen name="alert-rules" options={inner('Alert Rules')} />
+        <Stack.Screen name="integrations" options={inner('Slack, Teams & API')} />
         <Stack.Screen name="categories" options={inner('Productivity Categories')} />
         <Stack.Screen name="teams" options={inner('Teams')} />
         <Stack.Screen name="work-hours" options={inner('Working Hours')} />

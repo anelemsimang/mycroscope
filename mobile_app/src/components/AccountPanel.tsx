@@ -48,8 +48,12 @@ export function AccountPanel() {
       </Card>
       {isManager ? (
         <Card title="Organisation">
-          <LinkRow title="Alerts" subtitle="Integrity checks and PCs not reporting during working hours"
+          <LinkRow title="Alerts" subtitle="Integrity checks, alert rules, drives and copied files, PCs not reporting"
             onPress={() => router.push('/alerts')} />
+          <LinkRow title="Alert rules" subtitle="Alerts for file-sharing sites, personal email, Bluetooth and your own list"
+            onPress={() => router.push('/alert-rules')} />
+          <LinkRow title="Slack, Teams & API" subtitle="Send alerts to a channel or webhook; read-only API keys"
+            onPress={() => router.push('/integrations')} />
           <LinkRow title="Productivity categories" subtitle="Mark apps and websites as productive or unproductive, per team if needed"
             onPress={() => router.push('/categories')} />
           <LinkRow title="Insights" subtitle="Trends, workload, capacity and software licences"

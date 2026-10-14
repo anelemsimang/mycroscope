@@ -63,6 +63,22 @@ create table if not exists events (
   uploaded integer not null default 0
 );
 
+create table if not exists file_events (
+  id text primary key,
+  organization_id text not null,
+  employee_id text not null,
+  device_id text not null,
+  occurred_at text not null,
+  event_type text not null,
+  destination text not null,
+  label text,
+  file_name text,
+  file_count integer not null default 1,
+  size_bytes integer,
+  uploaded integer not null default 0
+);
+create index if not exists file_events_pending on file_events (employee_id, occurred_at) where uploaded = 0;
+
 create table if not exists kv (
   key text primary key,
   value text
@@ -178,6 +194,7 @@ class LocalStore:
                 (iso(before),),
             )
             self._db.execute("delete from events where uploaded = 1 and occurred_at < ?", (iso(before),))
+            self._db.execute("delete from file_events where uploaded = 1", ())
             self._db.execute(
                 "delete from sessions where ended_at is not null and ended_at < ? and version <= uploaded_version",
                 (iso(before),),
@@ -274,3 +291,37 @@ class LocalStore:
     def mark_events_uploaded(self, ids: Iterable[str]) -> None:
         with self._lock:
             self._db.executemany("update events set uploaded = 1 where id = ?", [(i,) for i in ids])
+
+    # ---- file activity (names and sizes only; removed locally once uploaded) ----
+    FILE_EVENT_FIELDS = ("id", "organization_id", "employee_id", "device_id", "occurred_at", "event_type",
+                         "destination", "label", "file_name", "file_count", "size_bytes")
+
+    def add_file_event(self, event: dict[str, Any]) -> None:
+        row = {f: event.get(f) for f in self.FILE_EVENT_FIELDS}
+        row["occurred_at"] = iso(row["occurred_at"])
+        row["file_count"] = row["file_count"] or 1
+        cols = ", ".join(self.FILE_EVENT_FIELDS)
+        params = ", ".join(f":{f}" for f in self.FILE_EVENT_FIELDS)
+        with self._lock:
+            self._db.execute(f"insert or ignore into file_events ({cols}) values ({params})", row)
+
+    def pending_file_events(self, employee_id: str, limit: int) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "select * from file_events where employee_id = ? and uploaded = 0 order by occurred_at limit ?",
+                (employee_id, limit),
+            ).fetchall()
+        return [{**{f: r[f] for f in self.FILE_EVENT_FIELDS}, "occurred_at": parse_iso(r["occurred_at"])} for r in rows]
+
+    def mark_file_events_uploaded(self, ids: Iterable[str]) -> None:
+        with self._lock:
+            self._db.executemany("update file_events set uploaded = 1 where id = ?", [(i,) for i in ids])
+
+    def drop_file_events(self, ids: Iterable[str]) -> None:
+        with self._lock:
+            self._db.executemany("delete from file_events where id = ?", [(i,) for i in ids])
+
+    def drop_stale_file_events(self, before: datetime) -> int:
+        """The server only accepts the last 14 days; older unsent rows can never be delivered."""
+        with self._lock:
+            return self._db.execute("delete from file_events where occurred_at < ?", (iso(before),)).rowcount

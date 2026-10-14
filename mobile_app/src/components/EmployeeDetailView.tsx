@@ -8,11 +8,12 @@ import {
   BarRow, Button, Card, Empty, ErrorBanner, InfoGrid, InnerTabs, LinkRow, Loading, Screen, SectionTitle, Segmented,
   StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
-import { api, errorMessage, type EmployeeRow } from '@/lib/api';
+import { DESTINATIONS, formatBytes } from '@/lib/alerts';
+import { api, errorMessage, type EmployeeRow, type FileEvent } from '@/lib/api';
 import { notify } from '@/lib/dialog';
 import { shareCsv } from '@/lib/export';
 import {
-  PERIOD_LABELS, addDays, formatDay, formatDuration, formatRelative, formatTime, periodRange, toCsv, todayIn,
+  PERIOD_LABELS, addDays, formatDateTime, formatDay, formatDuration, formatRelative, formatTime, periodRange, toCsv, todayIn,
   type PeriodKey,
 } from '@/lib/format';
 import { useAsync } from '@/lib/useAsync';
@@ -319,7 +320,65 @@ function History({ id, name, timezone, today, isSelf }: { id: string; name: stri
         </Card>
       ) : null}
       <Button title="Export daily summaries (CSV)" variant="secondary" onPress={exportCsv} loading={exporting} disabled={!data} />
+      <FileActivity id={id} timezone={timezone} isSelf={isSelf} />
     </>
+  );
+}
+
+const FILE_EVENT_TITLE = { drive_connected: 'Drive connected', phone_connected: 'Phone connected', file_copied: 'Copied' } as const;
+
+/** Loaded only on request: names of copied files are personal information, and every view by a manager is audited. */
+function FileActivity({ id, timezone, isSelf }: { id: string; timezone: string; isSelf: boolean }) {
+  const [rows, setRows] = useState<FileEvent[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function load() {
+    setError(null);
+    setBusy(true);
+    try {
+      const to = new Date();
+      const from = new Date(to.getTime() - HISTORY_DAYS * 86_400_000);
+      setRows(await api.fileActivity(id, from.toISOString(), to.toISOString()));
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="File activity">
+      {error ? <ErrorBanner message={error} /> : null}
+      {rows === null ? (
+        <>
+          <Text style={styles.hint}>
+            USB drives and phones connected, and files copied to removable drives, cloud folders or network drives in the
+            last {HISTORY_DAYS} days, if your company switched this on.{isSelf ? '' : ' Opening it is recorded in the audit log.'}
+          </Text>
+          <Button small variant="secondary" title="Show file activity" onPress={load} loading={busy} />
+        </>
+      ) : rows.length === 0 ? (
+        <Empty text="No file activity recorded." />
+      ) : (
+        rows.map((r) => (
+          <View key={r.id} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }}>
+            <Text style={styles.rowText} numberOfLines={2}>
+              <Text style={{ fontWeight: '600' }}>{FILE_EVENT_TITLE[r.event_type]}</Text>
+              {r.event_type === 'file_copied'
+                ? ` ${r.file_name ?? `${r.file_count} more files`} (${formatBytes(r.size_bytes)}) to ${DESTINATIONS[r.destination] ?? r.destination}`
+                : ''}
+              {r.label ? ` · ${r.label}` : ''}
+            </Text>
+            <Text style={styles.hint}>
+              {formatDateTime(r.occurred_at, timezone)}
+              {r.hostname ? ` · ${r.hostname}` : ''}
+            </Text>
+          </View>
+        ))
+      )}
+      {rows !== null && rows.length >= 2000 ? <Text style={styles.hint}>Showing the latest 2000 entries.</Text> : null}
+    </Card>
   );
 }
 

@@ -92,15 +92,16 @@ export function renderDigest(r: DigestRow, appUrl: string): Email {
 
 export function renderAlert(r: AlertRow, appUrl: string): Email {
   const org = oneLine(r.organization_name);
-  const what = plural(r.alerts, 'new integrity alert');
+  const what = plural(r.alerts, 'new alert');
   const high = r.high_alerts ? `, ${r.high_alerts} marked high` : '';
   const intro = `Hi ${firstName(r.recipient_name)}, Mycroscope recorded ${what}${high} at ${org}.`;
   const detail = 'Alerts include gaps in recording while the app should have been running, virtual machines, remote '
-    + 'sessions and unusual input patterns. They are signals to look into, not proof of wrongdoing. Details are in the app under Alerts.';
+    + 'sessions, unusual input patterns, your company\'s alert rules, and USB drives, phones and copied files where that '
+    + 'is switched on. They are signals to look into, not proof of wrongdoing. Details are in the app under Alerts.';
   return {
     to: r.recipient_email,
     subject: oneLine(`Mycroscope: ${what} at ${org}`, 150),
     text: [intro, '', detail, '', appUrl ? `Review them: ${appUrl}/alerts` : '', '', FOOTER].join('\n'),
-    html: layout('New integrity alerts', [intro, detail], [], appUrl ? `${appUrl}/alerts` : '', FOOTER),
+    html: layout('New alerts', [intro, detail], [], appUrl ? `${appUrl}/alerts` : '', FOOTER),
   };
 }

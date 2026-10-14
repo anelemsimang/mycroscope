@@ -17,23 +17,26 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const hhmm = (t: string) => (t ?? '').slice(0, 5);
 const IDLE_MINUTES = [1, 2, 3, 5, 10, 15, 30, 60];
-const LIMITS = { retention_days: [7, 1825], summary_retention_days: [30, 3650] } as const;
+const LIMITS = { retention_days: [7, 1825], summary_retention_days: [30, 3650], file_retention_days: [7, 365] } as const;
 
 export default function Monitoring() {
   const profile = useProfile();
   const { data, error, loading, refresh } = useAsync(async () => {
-    const [settings, policies] = await Promise.all([api.complianceSettings(profile.organizationId), api.policies()]);
-    return { settings, current: policies[0] ?? null };
+    const [settings, policies, features] = await Promise.all([
+      api.complianceSettings(profile.organizationId), api.policies(), api.features(),
+    ]);
+    return { settings, current: policies[0] ?? null, fileActivity: features.includes('file_activity') };
   }, [profile.organizationId]);
 
   if (loading && !data) return <Loading />;
   if (!data) return <Screen><ErrorBanner message={error ?? 'Could not load settings.'} onRetry={refresh} /></Screen>;
-  return <MonitoringForm key={data.settings.updated_at} initial={data.settings} current={data.current} onSaved={refresh} />;
+  return <MonitoringForm key={data.settings.updated_at} initial={data.settings} current={data.current}
+    fileActivityAllowed={data.fileActivity} onSaved={refresh} />;
 }
 
-function MonitoringForm({ initial, current, onSaved }: {
+function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
   initial: ComplianceSettings; current: { version: number; notice_text: string; published_at: string } | null;
-  onSaved: () => void;
+  fileActivityAllowed: boolean; onSaved: () => void;
 }) {
   const profile = useProfile();
   const { aal, reloadService } = useSession();
@@ -44,6 +47,7 @@ function MonitoringForm({ initial, current, onSaved }: {
   });
   const [retention, setRetention] = useState(String(initial.retention_days));
   const [summaryRetention, setSummaryRetention] = useState(String(initial.summary_retention_days));
+  const [fileRetention, setFileRetention] = useState(String(initial.file_retention_days));
   const [showNotice, setShowNotice] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +71,8 @@ function MonitoringForm({ initial, current, onSaved }: {
     if (typeof detail === 'string') return setError(detail);
     const summary = parseDays(summaryRetention, 'summary_retention_days', 'Daily totals retention');
     if (typeof summary === 'string') return setError(summary);
+    const files = parseDays(fileRetention, 'file_retention_days', 'File activity retention');
+    if (typeof files === 'string') return setError(files);
     if ((draft.notice_custom_text ?? '').length > 4000) return setError('The message to employees is limited to 4000 characters.');
     if (draft.tracking_schedule === 'work_hours') {
       if (draft.work_days.length === 0) return setError('Choose at least one working day.');
@@ -76,7 +82,7 @@ function MonitoringForm({ initial, current, onSaved }: {
     if (draft.require_mfa && !initial.require_mfa && aal.next !== 'aal2') {
       return setError('Set up two-factor login for your own account first (Settings), or you would lock yourself out of employee data.');
     }
-    const next: Draft = { ...draft, retention_days: detail, summary_retention_days: summary };
+    const next: Draft = { ...draft, retention_days: detail, summary_retention_days: summary, file_retention_days: files };
 
     const initialDraft: Draft = { ...initial, work_start: hhmm(initial.work_start), work_end: hhmm(initial.work_end) };
     const changed = (Object.keys(next) as (keyof Draft)[])
@@ -97,6 +103,9 @@ function MonitoringForm({ initial, current, onSaved }: {
     }
     if (summary < initial.summary_retention_days) {
       warnings.push(`Daily totals older than ${summary} days will be permanently deleted at the next nightly clean-up.`);
+    }
+    if (files < initial.file_retention_days) {
+      warnings.push(`File activity older than ${files} days will be permanently deleted at the next nightly clean-up.`);
     }
     if (!(await confirmAction('Save and publish?', warnings.join('\n\n'), 'Save and publish'))) return;
 
@@ -195,6 +204,34 @@ function MonitoringForm({ initial, current, onSaved }: {
         <ToggleRow label="Detect attempts to avoid monitoring" value={draft.detect_tampering}
           onChange={(v) => set('detect_tampering', v)}
           hint="Flags when the app is stopped while the PC stays on, runs in a virtual machine or remote session, or input comes in a machine-regular rhythm (mouse jigglers). Results appear under Alerts; employees are told in the notice." />
+      </Card>
+
+      <Card title="File activity">
+        <Text style={styles.hint}>
+          Records when a USB drive, external disk or phone is connected, and the names and sizes of files copied onto
+          removable drives, into cloud folders or onto network drives. File contents are never read. Managers see file
+          names only on an employee's page, and every view is written to the audit log. Alerts, Slack/Teams messages and
+          the API only show counts. Files copied onto a phone cannot be seen, only that a phone was connected.
+        </Text>
+        {!fileActivityAllowed ? (
+          <Text style={[styles.hint, { color: colors.danger }]}>
+            File activity is not included in your plan. Contact Mycroscope to upgrade.
+          </Text>
+        ) : null}
+        <ToggleRow label="USB drives, external disks and phones" value={draft.detect_removable_media}
+          disabled={!fileActivityAllowed && !draft.detect_removable_media}
+          onChange={(v) => set('detect_removable_media', v)}
+          hint="Connections, and files copied onto the drive. Large copies raise a high-severity alert." />
+        <ToggleRow label="Cloud sync folders" value={draft.detect_cloud_sync}
+          disabled={!fileActivityAllowed && !draft.detect_cloud_sync}
+          onChange={(v) => set('detect_cloud_sync', v)}
+          hint="New files in OneDrive, Dropbox and Google Drive folders on the PC. Only large copies raise an alert." />
+        <ToggleRow label="Network drives" value={draft.detect_network_drives}
+          disabled={!fileActivityAllowed && !draft.detect_network_drives}
+          onChange={(v) => set('detect_network_drives', v)}
+          hint="Files the employee copies to mapped network drives (not colleagues' files). Only large copies raise an alert." />
+        <Field label="Keep file activity for (days)" value={fileRetention} onChangeText={setFileRetention}
+          keyboardType="number-pad" hint="7 to 365. Names and sizes of copied files older than this are deleted nightly." />
       </Card>
 
       <Card title="Account security">

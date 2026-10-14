@@ -111,6 +111,7 @@ class SyncService:
         self._push_sessions()
         self._push_segments()
         self._push_events()
+        self._push_file_events()
         if force_status or now - self._last_status >= STATUS_INTERVAL_SECONDS:
             self.push_status()
             self._last_status = now
@@ -251,6 +252,31 @@ class SyncService:
                     log.warning("Event %s dropped: %s", row["id"], row_exc)
                 self.store.mark_events_uploaded([row["id"]])
 
+    def _push_file_events(self) -> None:
+        self.store.drop_stale_file_events(self.clock.now() - timedelta(days=13))
+        for _ in range(20):
+            events = self.store.pending_file_events(self.identity.employee_id, 500)
+            if not events:
+                return
+            rows = [{**e, "occurred_at": to_server_time(e["occurred_at"])} for e in events]
+            try:
+                self.api.upsert("file_events", rows, on_conflict="id", ignore_duplicates=True)
+                self.store.mark_file_events_uploaded(e["id"] for e in events)
+            except ApiError as exc:
+                log.info("File activity batch rejected (%s); retrying one by one", exc)
+                for row in rows:
+                    try:
+                        self.api.upsert("file_events", [row], on_conflict="id", ignore_duplicates=True)
+                        self.store.mark_file_events_uploaded([row["id"]])
+                    except ApiError as row_exc:
+                        if row_exc.code not in PERMANENT_CODES:
+                            raise
+                        # e.g. the company switched detection off before this was sent
+                        log.info("File activity %s dropped: %s", row["id"], row_exc.code)
+                        self.store.drop_file_events([row["id"]])
+            if len(events) < 500:
+                return
+
     def push_status(self, state_override: Optional[str] = None) -> None:
         i = self.identity
         live = self.status_provider()
@@ -286,3 +312,11 @@ class SyncService:
             "device_id": i.device_id, "occurred_at": at or self.clock.now(), "event_type": event_type,
             "details": details or {},
         })
+
+    def record_file_event(self, event: dict[str, Any]) -> None:
+        i = self.identity
+        self.store.add_file_event({
+            **event, "id": str(uuid.uuid4()), "organization_id": i.organization_id,
+            "employee_id": i.employee_id, "device_id": i.device_id,
+        })
+        self.poke()

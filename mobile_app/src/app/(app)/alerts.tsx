@@ -27,10 +27,14 @@ export default function Alerts() {
     <Screen refreshing={refreshing} onRefresh={refresh}>
       <Card>
         <Text style={styles.hint}>
-          Signals that tracking may have been avoided or interfered with. They are indications, not proof: talk to the
-          employee before drawing conclusions. Which checks run is set under Monitoring & privacy, and employees are told
-          about them in the monitoring notice.
+          Signals that tracking may have been avoided, that an alert rule matched, or that a drive or phone was connected
+          and files copied. They are indications, not proof: talk to the employee before drawing conclusions. Which checks
+          run is set under Monitoring & privacy and Alert rules, and employees are told about them in the monitoring notice.
         </Text>
+        <View style={[styles.row, { gap: 16, flexWrap: 'wrap' }]}>
+          <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/alert-rules')}>Alert rules</Text>
+          <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/integrations')}>Slack, Teams & API</Text>
+        </View>
         <Segmented options={(Object.keys(PERIODS) as Period[]).map((p) => ({ value: p, label: PERIODS[p] }))} value={days} onChange={setDays} />
         {kinds.length > 1 ? (
           <Segmented options={[{ value: 'all', label: 'All' }, ...kinds.map((k) => ({ value: k, label: ALERT_TITLES[k] ?? k }))]}

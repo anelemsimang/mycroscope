@@ -26,7 +26,7 @@ export function quote(seats: number, months: number, perSeatCents: number, annua
 
 const encoder = new TextEncoder();
 
-async function hmacHex(hash: 'SHA-256' | 'SHA-512', key: string, data: string): Promise<string> {
+export async function hmacHex(hash: 'SHA-256' | 'SHA-512', key: string, data: string): Promise<string> {
   const k = await crypto.subtle.importKey('raw', encoder.encode(key), { name: 'HMAC', hash }, false, ['sign']);
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', k, encoder.encode(data)));
   return Array.from(sig, (b) => b.toString(16).padStart(2, '0')).join('');

@@ -21,6 +21,7 @@ from core.api import ApiError, AuthError, NetworkError, Session, SupabaseApi, to
 from core.credentials import CredentialStore
 from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
+from core.files import FileActivityMonitor, FileSettings
 from core.store import LocalStore
 from core.sync import SyncService
 from utils.logger import get_logger
@@ -57,6 +58,7 @@ class Agent:
         self.paused = False
         self.engine: Optional[SegmentEngine] = None
         self.sync: Optional[SyncService] = None
+        self.files: Optional[FileActivityMonitor] = None
         self._engine_lock = threading.Lock()
         self._tracker: Optional[threading.Thread] = None
         self._stop_tracking = threading.Event()
@@ -354,6 +356,7 @@ class Agent:
         )
         self.engine = SegmentEngine(self.store, self.identity, self.settings, self._engine_event)
         self.engine.start(now)
+        self.files = FileActivityMonitor(self._file_event, self.store.get, self.store.set, self.clock.now)
         self.sync.record_event("login", {"agent_version": VERSION}, at=now)
         offset = self.api.clock_offset_seconds
         if offset is not None and abs(offset) > MAX_CLOCK_SKEW_SECONDS:
@@ -374,6 +377,11 @@ class Agent:
             self.sync.record_event(kind, details, at=at)
         if kind == "wake" and self.sync:
             self.sync.poke()
+
+    def _file_event(self, event: dict[str, Any]) -> None:
+        sync = self.sync
+        if sync:
+            sync.record_file_event(event)
 
     # ---- integrity -------------------------------------------------------
     def _heartbeat_key(self) -> str:
@@ -456,6 +464,11 @@ class Agent:
                     elif sample.locked:
                         rhythm.reset()
 
+                if self.files:
+                    self.files.configure(
+                        FileSettings(s.detect_removable_media, s.detect_cloud_sync, s.detect_network_drives),
+                        active=block is None and not self.paused)
+
                 if s.schedule.mode == "work_hours" and block != "inactive":
                     is_working = block is None
                     if working is not None and is_working != working:
@@ -495,6 +508,9 @@ class Agent:
         if not self.tracking:
             return
         self._stop_tracker_thread()
+        if self.files:
+            self.files.stop()
+            self.files = None
         now = self.clock.now()
         with self._engine_lock:
             if self.engine:
