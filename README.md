@@ -182,10 +182,13 @@ tracked computer time. From the migration below, productive totals can also incl
 
 `20261016090000_alerts_and_integrations.sql` (apply after the one above) adds:
 - **Alert rules** (Standard and up; manager app -> Alerts -> Alert rules): an alert when someone uses a website
-  (the domain and its subdomains) or program you name. Suggested lists add file-sharing sites, personal email and
-  Bluetooth file transfer (`fsquirt.exe`). Rules are checked on the server as activity arrives, so they work with
+  (the domain and its subdomains) or program you name. A rule can instead restrict a program: agent 2.6.0 minimises
+  it when it comes to the front while monitoring is on, shows a short notice, and records an alert. No administrator
+  rights are needed, and it starts only after the employee acknowledges the notice. A restricted website is named in
+  that notice and raises an alert; the website is not blocked. Suggested lists add file-sharing sites, personal email and
+  Bluetooth file transfer (`fsquirt.exe`). Rules are checked on the server as activity arrives, so the alert works with
   every agent version, but only for what is recorded (Websites / Applications switched on). An alert shows a visit,
-  not an upload.
+  not an upload. Reinstall `Mycroscope-Setup.exe` for the program to be minimised.
 - **File activity** (Business and up; Monitoring & privacy -> File activity, off by default): with agent 2.3, USB
   drive, external disk and phone connections, and the names and sizes of files copied to removable drives, cloud
   sync folders (OneDrive, Dropbox, Google Drive) and, optionally, network drives. File contents are never read.
@@ -274,7 +277,9 @@ trial. It stays off until an owner switches it on under Monitoring & privacy. A 
 Insights -> Advice: week in review, workload, where time went, capacity, or how the period changed. The report is
 written inside Mycroscope from the trends, workload, capacity and software figures already stored, using that
 manager's own sign-in so a team manager only sees their teams. Every number in the report comes from those figures.
-Pay figures are left out. Nothing is sent to another company to write the report.
+The report leads with the result that crosses a threshold: someone over or under the company's goal, a rise or fall
+of more than about 15% through the period, a capacity gap of an hour or more, one app taking most of the open time,
+or productive time away from the computer reaching about a quarter of the total. Pay figures are left out. Nothing is sent to another company to write the report.
 
 `20261022090000_report_templates.sql` (apply after the free-plan migration) replaces the employee-notice sentence that
 named an outside service. While written reports are on, the notice says the report is written inside Mycroscope from
@@ -299,6 +304,12 @@ continues for the people already on the free plan. A fourth person cannot be add
 is deactivated or the company pays. People already over 3 stay active until the company deactivates them. Paystack
 checkout is unchanged and moves a free company to Standard. The operator console can also set the plan to free.
 The desktop app does not change for this.
+
+`20261023090000_restrictions.sql` (apply after `20261022090000_report_templates.sql`) lets an alert rule restrict a
+program or a website. A restricted program is minimised by agent 2.6.0, with a short notice, while monitoring is on.
+A restricted website is named in the employee notice and raises an alert. It is not blocked. Saving or removing a
+restriction publishes a new notice, and the program is only minimised after the employee acknowledges it. Reinstall
+`Mycroscope-Setup.exe`.
 
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.

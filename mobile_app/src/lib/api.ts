@@ -196,6 +196,7 @@ export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' 
 export type Severity = 'low' | 'medium' | 'high';
 export interface AlertRule {
   id: string; name: string; kind: 'domain' | 'app'; pattern: string; severity: Severity;
+  action: 'alert' | 'restrict';
   work_hours_only: boolean; enabled: boolean; pack: string | null;
 }
 export type RulePack = 'file_sharing' | 'personal_email' | 'bluetooth';
@@ -798,14 +799,14 @@ export const api = {
   // ---- alert rules (owners and managers not limited to teams change them) -----
   alertRules: async () => {
     const { data, error } = await supabase.from('alert_rules')
-      .select('id,name,kind,pattern,severity,work_hours_only,enabled,pack').order('name');
+      .select('id,name,kind,pattern,severity,action,work_hours_only,enabled,pack').order('name');
     if (error) throw error;
     return (data ?? []) as AlertRule[];
   },
   saveAlertRule: (r: Omit<AlertRule, 'id' | 'pack'> & { id: string | null }) =>
     rpc<AlertRule>('save_alert_rule', {
       p_id: r.id, p_name: r.name, p_kind: r.kind, p_pattern: r.pattern, p_severity: r.severity,
-      p_work_hours_only: r.work_hours_only, p_enabled: r.enabled,
+      p_work_hours_only: r.work_hours_only, p_enabled: r.enabled, p_action: r.action,
     }),
   deleteAlertRule: (id: string) => rpc<void>('delete_alert_rule', { p_id: id }),
   /** Returns how many rules were added (ones already there are kept as they are). */

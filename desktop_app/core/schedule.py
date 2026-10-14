@@ -61,11 +61,7 @@ class Schedule:
             return acknowledged
         return Schedule(self.mode, self.work_days, self.work_start, self.work_end, self.timezone, also=acknowledged)
 
-    def is_work_time(self, at: datetime) -> bool:
-        if self.also is not None and not self.also.is_work_time(at):
-            return False
-        if self.mode != "work_hours":
-            return True
+    def _clock_in_hours(self, at: datetime) -> bool:
         try:
             local = at.astimezone(ZoneInfo(self.timezone))
         except Exception:
@@ -76,6 +72,19 @@ class Schedule:
             return today and self.work_start <= t < self.work_end
         yesterday = (local - timedelta(days=1)).isoweekday() in self.work_days
         return (today and t >= self.work_start) or (yesterday and t < self.work_end)
+
+    def is_work_time(self, at: datetime) -> bool:
+        if self.also is not None and not self.also.is_work_time(at):
+            return False
+        if self.mode != "work_hours":
+            return True
+        return self._clock_in_hours(at)
+
+    def during_work_hours(self, at: datetime) -> bool:
+        """Working hours even when monitoring itself runs all day."""
+        if self.also is not None and not self.also._clock_in_hours(at):
+            return False
+        return self._clock_in_hours(at)
 
     def overlaps(self, start: datetime, end: datetime, step_minutes: int = 15) -> bool:
         """Whether any part of [start, end] falls in working time (sampled every step_minutes)."""

@@ -50,7 +50,12 @@ export function describeAlert(a: Pick<IntegrityAlert, 'kind' | 'details'>): stri
       return `${d.hostname ? `The PC "${String(d.hostname)}"` : 'A PC'} was used for ${n(d.minutes)} minutes without Mycroscope tracking: nobody was signed in, or the monitoring notice was not accepted. It is listed under the last person who signed in on it; nothing about what it was used for is recorded.`;
     case 'policy_violation': {
       const matched = Array.isArray(d.matched) ? d.matched.map(String).filter(Boolean).join(', ') : '';
-      return `Alert rule "${String(d.rule ?? 'rule')}": ${matched || 'a match'} was in use for ${minutesText(n(d.seconds))}. This shows the ${d.rule_kind === 'app' ? 'program was used' : 'site was visited'}, not what was done there.`;
+      const restricted = d.action === 'restrict';
+      const noun = d.rule_kind === 'app' ? 'program was used' : 'site was visited';
+      const title = restricted
+        ? (d.rule_kind === 'app' ? 'Restricted program' : 'Restricted website')
+        : `Alert rule "${String(d.rule ?? 'rule')}"`;
+      return `${title}${restricted && d.rule ? ` "${String(d.rule)}"` : ''}: ${matched || 'a match'} was in use for ${minutesText(n(d.seconds))}. This shows the ${noun}, not what was done there.`;
     }
     case 'device_connected':
       return d.destination === 'phone'

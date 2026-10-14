@@ -84,7 +84,10 @@ export function describeAlert(a: Pick<ChannelAlert, 'kind' | 'details'>): string
       return `${d.hostname ? `"${str(d.hostname)}"` : 'A PC'} was used for ${num(d.minutes)} minutes without anyone signed in to Mycroscope.`;
     case 'policy_violation': {
       const matched = Array.isArray(d.matched) ? d.matched.map(str).filter(Boolean).join(', ') : '';
-      return `${str(d.rule) || 'Alert rule'}: ${matched || 'matched'} for ${duration(num(d.seconds))}.`;
+      const what = d.action === 'restrict'
+        ? (d.rule_kind === 'app' ? 'Restricted program' : 'Restricted website')
+        : (str(d.rule) || 'Alert rule');
+      return `${what}${d.action === 'restrict' && d.rule ? ` (${str(d.rule)})` : ''}: ${matched || 'matched'} for ${duration(num(d.seconds))}.`;
     }
     case 'device_connected':
       return d.destination === 'phone'

@@ -21,6 +21,7 @@ from core.api import ApiError, AuthError, NetworkError, Session, SupabaseApi, to
 from core.credentials import CredentialStore
 from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
+from core.restrict import Restrictor
 from core.files import FileActivityMonitor, FileSettings
 from core.location import PlaceTracker, classify, offices_from_settings, read_wifi_ssid
 from core.offline import REASONS, OfflinePrompt, ReturnTracker, clean_note
@@ -63,6 +64,7 @@ class Agent:
         self.files: Optional[FileActivityMonitor] = None
         self.returns = ReturnTracker()
         self.places = PlaceTracker()
+        self.restrictor = Restrictor()
         self._offline_lock = threading.Lock()
         self._offline_queue: list[OfflinePrompt] = []
         self._engine_lock = threading.Lock()
@@ -475,6 +477,10 @@ class Agent:
                             self.sync.record_event("input_anomaly", anomaly, at=now)
                     elif sample.locked:
                         rhythm.reset()
+                    if not self.paused and not sample.locked:
+                        self.restrictor.enforce(
+                            s.restrictions, sample.app_name, sample.process_name, now,
+                            monitoring=True, paused=False, in_work_hours=s.schedule.during_work_hours(now))
 
                 earliest = self.engine.session_started_at if self.engine else None
                 minutes = s.offline_prompt_minutes if isinstance(s.offline_prompt_minutes, int) else 10

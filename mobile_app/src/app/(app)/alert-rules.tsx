@@ -19,7 +19,9 @@ const PACKS: { pack: RulePack; title: string; hint: string }[] = [
 ];
 
 type Draft = Omit<AlertRule, 'id' | 'pack'> & { id: string | null };
-const EMPTY: Draft = { id: null, name: '', kind: 'domain', pattern: '', severity: 'medium', work_hours_only: false, enabled: true };
+const EMPTY: Draft = {
+  id: null, name: '', kind: 'domain', pattern: '', severity: 'medium', action: 'alert', work_hours_only: false, enabled: true,
+};
 
 export default function AlertRules() {
   const profile = useProfile();
@@ -76,10 +78,12 @@ export default function AlertRules() {
     <Screen>
       <Card title="Alert rules">
         <Text style={styles.hint}>
-          Raise an alert when someone uses a website or program you name, for example file-sharing sites or personal
-          email. Rules are checked against the activity the desktop app already records, so they need Websites and
-          Applications switched on under Monitoring & privacy. An alert shows that a site was visited or a program used,
-          not what was done there. Alerts appear under Alerts and in Slack/Teams if connected.
+          Raise an alert when someone uses a website or program you name, or restrict a program so the desktop app
+          minimises it and shows a short notice. A restricted website is named in the employee notice and raises an
+          alert. Mycroscope does not block the website. Rules are checked against activity the desktop app already
+          records, so they need Websites and Applications switched on under Monitoring & privacy. An alert shows that
+          a site was visited or a program used, not what was done there. Restricting a program needs the desktop app
+          version 2.6.0. Alerts appear under Alerts and in Slack/Teams if connected.
         </Text>
         {!data.allowed ? (
           <Text style={[styles.hint, { color: colors.danger }]}>Alert rules are not included in your plan. Contact Mycroscope to upgrade.</Text>
@@ -118,6 +122,7 @@ export default function AlertRules() {
                 <Text style={[styles.rowText, { fontWeight: '600', opacity: r.enabled ? 1 : 0.5 }]}>{r.name}</Text>
                 <Text style={styles.hint}>
                   {r.kind === 'domain' ? 'Website' : 'Program'}: {r.pattern}
+                  {r.action === 'restrict' ? ' · restrict' : ''}
                   {r.work_hours_only ? ' · working hours only' : ''}{r.enabled ? '' : ' · off'}
                 </Text>
               </View>
@@ -179,6 +184,16 @@ function RuleEditor({ initial, onSaved, onCancel }: { initial: Draft; onSaved: (
         hint={draft.kind === 'domain'
           ? 'Also matches its subdomains (mail.example.com). Use * as a wildcard.'
           : 'The application name or program file, e.g. "Telegram" or telegram.exe. Use * as a wildcard.'} />
+      <Text style={styles.label}>What happens</Text>
+      <Segmented options={[{ value: 'alert', label: 'Alert only' }, { value: 'restrict', label: 'Restrict' }]}
+        value={draft.action} onChange={(v) => set('action', v)} />
+      <Text style={styles.hint}>
+        {draft.action === 'restrict' && draft.kind === 'app'
+          ? 'While monitoring is on, the desktop app minimises this program, shows a short notice, and records an alert. No administrator rights are needed. The employee is told in the notice, and it starts after they acknowledge it.'
+          : draft.action === 'restrict'
+            ? 'The employee notice names this website and an alert is recorded if it is opened. Mycroscope does not block the website.'
+            : 'An alert is recorded. The program or website is left open.'}
+      </Text>
       <Text style={styles.label}>Severity</Text>
       <Segmented options={SEVERITIES} value={draft.severity} onChange={(v) => set('severity', v)} />
       <ToggleRow label="Only during working hours" value={draft.work_hours_only} onChange={(v) => set('work_hours_only', v)} />

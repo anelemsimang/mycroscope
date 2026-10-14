@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 
 from config import MAX_SEGMENT_SECONDS, PERSIST_OPEN_SEGMENT_SECONDS, SLEEP_GAP_SECONDS, TITLE_DEBOUNCE_SECONDS
 from core.monitor import Sample
+from core.restrict import Restriction, narrow_restrictions, parse_restrictions
 from core.schedule import Schedule
 from core.store import LocalStore
 from utils.logger import get_logger
@@ -50,13 +51,16 @@ class TrackingSettings:
     offline_prompt_minutes: int = 10
     track_work_location: bool = False
     schedule: Schedule = field(default_factory=Schedule)
+    restrictions: tuple[Restriction, ...] = ()
 
     @classmethod
     def from_dict(cls, d: Optional[dict[str, Any]], timezone: str = "Africa/Johannesburg",
                   employee_id: Optional[str] = None, team_id: Optional[str] = None) -> "TrackingSettings":
         d = d or {}
-        known = {k: d[k] for k in cls.__dataclass_fields__ if k in d and d[k] is not None and k != "schedule"}
-        return cls(**known, schedule=Schedule.from_settings(d, timezone, employee_id, team_id))
+        known = {k: d[k] for k in cls.__dataclass_fields__
+                 if k in d and d[k] is not None and k not in ("schedule", "restrictions")}
+        return cls(**known, restrictions=parse_restrictions(d.get("restrictions")),
+                   schedule=Schedule.from_settings(d, timezone, employee_id, team_id))
 
     def narrowed_to(self, acknowledged: Optional["TrackingSettings"]) -> "TrackingSettings":
         """Records nothing the employee has not acknowledged; used while a new notice awaits acknowledgement.
@@ -81,6 +85,7 @@ class TrackingSettings:
             offline_prompt_minutes=max(self.offline_prompt_minutes, a.offline_prompt_minutes),
             track_work_location=self.track_work_location and a.track_work_location,
             schedule=self.schedule.narrowed_to(acknowledged.schedule if acknowledged else None),
+            restrictions=narrow_restrictions(self.restrictions, None if acknowledged is None else a.restrictions),
         )
 
 

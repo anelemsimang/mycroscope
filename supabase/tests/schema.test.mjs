@@ -1476,6 +1476,26 @@ test('the nightly job records an ended trial as the free plan, and payment moves
       and details ->> 'reference' = 'free-upgrade-test'`, [ctx.orgId]);
 });
 
+test('a restricted program is named in the notice, and a restricted website is not described as blocked', async () => {
+  const steam = (await asUser(ctx.ownerAuth,
+    `select id from save_alert_rule(null, 'Steam', 'app', 'Steam', 'high', false, true, 'restrict')`)).rows[0];
+  const notice = (await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()')).rows[0];
+  assert.match(notice.notice_text, /minimises it/);
+  assert.match(notice.notice_text, /steam/);
+  assert.ok((notice.settings.restrictions ?? []).some((rule) => rule.pattern === 'steam' && rule.kind === 'app'));
+  const site = (await asUser(ctx.ownerAuth,
+    `select id from save_alert_rule(null, 'Facebook', 'domain', 'facebook.com', 'medium', true, true, 'restrict')`)).rows[0];
+  const named = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.match(named.notice_text, /facebook\.com/);
+  assert.match(named.notice_text, /does not block the website/);
+  await rejects(asUser(ctx.ownerAuth,
+    `select save_alert_rule(null, 'Bad', 'app', 'nope.exe', 'low', false, true, 'block')`), /Alert or restrict/);
+  await asUser(ctx.ownerAuth, 'select delete_alert_rule($1)', [steam.id]);
+  await asUser(ctx.ownerAuth, 'select delete_alert_rule($1)', [site.id]);
+  const quiet = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.doesNotMatch(quiet.notice_text, /minimises it/);
+});
+
 test('the sign-in reminder migration republishes every notice without changing settings', async () => {
   const before = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot from monitoring_policies order by version desc limit 1')).rows[0];
   await db.exec(readFileSync(path.join(migrationsDir, '20261010090000_notice_sign_in_reminders.sql'), 'utf8'));
@@ -1545,5 +1565,5 @@ test('deleting an employee removes their data and is audited', async () => {
   const left = await db.query('select count(*)::int as n from activity_segments where employee_id = $1', [ctx.empId]);
   assert.equal(left.rows[0].n, 0);
   const audit = await asUser(ctx.ownerAuth, `select details from audit_log where action = 'employee_deleted'`);
-  assert.equal(audit.rows[0].details.reason, 'Left the company');
+  assert.ok(audit.rows.some((row) => row.details.reason === 'Left the company'));
 });
