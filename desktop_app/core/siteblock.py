@@ -21,12 +21,11 @@ BLOCKED = b"HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n
 _CHUNK = 65536
 
 
-def active_domains(rules: tuple[Restriction, ...], *, monitoring: bool, paused: bool, in_work_hours: bool) -> tuple[str, ...]:
-    if not monitoring or paused:
-        return ()
+def active_domains(rules: tuple[Restriction, ...]) -> tuple[str, ...]:
+    """Every restricted website, including outside working hours and while tracking is paused."""
     found: list[str] = []
     for rule in rules:
-        if rule.kind != "domain" or (rule.work_hours_only and not in_work_hours):
+        if rule.kind != "domain":
             continue
         pattern = rule.pattern.strip().lower()
         if "." not in pattern:
@@ -60,8 +59,8 @@ class SiteBlock:
         self._lock = threading.Lock()
         self.restore()
 
-    def apply(self, rules: tuple[Restriction, ...], *, monitoring: bool, paused: bool, in_work_hours: bool) -> None:
-        patterns = active_domains(rules, monitoring=monitoring, paused=paused, in_work_hours=in_work_hours)
+    def apply(self, rules: tuple[Restriction, ...]) -> None:
+        patterns = active_domains(rules)
         with self._lock:
             if patterns == self._patterns and (not patterns or self._server is not None):
                 return

@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 APP_NAME = "Mycroscope"
-VERSION = "2.6.1"
+VERSION = "2.6.2"
 
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).parent

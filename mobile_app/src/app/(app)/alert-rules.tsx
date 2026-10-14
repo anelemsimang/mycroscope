@@ -79,12 +79,13 @@ export default function AlertRules() {
       <Card title="Alert rules">
         <Text style={styles.hint}>
           Raise an alert when someone uses a website or program you name, or restrict a program so the desktop app
-          minimises it and shows a short notice. A restricted website is refused by Google Chrome and Microsoft Edge
-          while monitoring is on, unless this computer already uses its own web proxy. Other sites keep working.
-          Rules are checked against activity the desktop app already records, so they need Websites and Applications
-          switched on under Monitoring & privacy. An alert shows that a site was visited or a program used, not what
-          was done there. Restricting a program or a website needs the desktop app version 2.6.1. Alerts appear under
-          Alerts and in Slack/Teams if connected.
+          minimises it and shows a short notice. A restricted website stays blocked in Google Chrome and Microsoft Edge
+          the whole time the employee is signed in, including after hours and while tracking is paused. Other sites
+          keep working. If that computer already uses its own web proxy, the site is not blocked. Rules are checked
+          against activity the desktop app already records, so they need Websites and Applications switched on under
+          Monitoring & privacy. An alert shows that a site was visited or a program used, not what was done there.
+          Restricting a program or a website needs the desktop app version 2.6.2. Alerts appear under Alerts and in
+          Slack/Teams if connected.
         </Text>
         {!data.allowed ? (
           <Text style={[styles.hint, { color: colors.danger }]}>Alert rules are not included in your plan. Contact Mycroscope to upgrade.</Text>
@@ -124,7 +125,8 @@ export default function AlertRules() {
                 <Text style={styles.hint}>
                   {r.kind === 'domain' ? 'Website' : 'Program'}: {r.pattern}
                   {r.action === 'restrict' ? ' · restrict' : ''}
-                  {r.work_hours_only ? ' · working hours only' : ''}{r.enabled ? '' : ' · off'}
+                  {r.action === 'restrict' && r.kind === 'domain' ? '' : r.work_hours_only ? ' · working hours only' : ''}
+                  {r.enabled ? '' : ' · off'}
                 </Text>
               </View>
               <Pill text={r.severity} color={severityColor[r.severity]} />
@@ -164,7 +166,13 @@ function RuleEditor({ initial, onSaved, onCancel }: { initial: Draft; onSaved: (
     if (!draft.pattern.trim()) return setError(draft.kind === 'domain' ? 'Enter a website, e.g. wetransfer.com.' : 'Enter a program, e.g. fsquirt.exe.');
     setBusy(true);
     try {
-      await api.saveAlertRule({ ...draft, name: draft.name.trim(), pattern: draft.pattern.trim() });
+      const alwaysBlocked = draft.action === 'restrict' && draft.kind === 'domain';
+      await api.saveAlertRule({
+        ...draft,
+        name: draft.name.trim(),
+        pattern: draft.pattern.trim(),
+        work_hours_only: alwaysBlocked ? false : draft.work_hours_only,
+      });
       onSaved();
     } catch (e) {
       setError(errorMessage(e));
@@ -192,12 +200,16 @@ function RuleEditor({ initial, onSaved, onCancel }: { initial: Draft; onSaved: (
         {draft.action === 'restrict' && draft.kind === 'app'
           ? 'While monitoring is on, the desktop app minimises this program, shows a short notice, and records an alert. No administrator rights are needed. The employee is told in the notice, and it starts after they acknowledge it.'
           : draft.action === 'restrict'
-            ? 'While monitoring is on, Google Chrome and Microsoft Edge refuse this website. Other sites keep working. If this computer already uses its own web proxy, the site is not blocked and an alert is recorded instead. The employee is told in the notice, and it starts after they acknowledge it.'
+            ? 'Google Chrome and Microsoft Edge refuse this website the whole time the employee is signed in, including after hours and while tracking is paused. Other sites keep working. If that computer already uses its own web proxy, the site is not blocked and an alert is recorded instead. The employee is told in the notice, and it starts after they acknowledge it.'
             : 'An alert is recorded. The program or website is left open.'}
       </Text>
       <Text style={styles.label}>Severity</Text>
       <Segmented options={SEVERITIES} value={draft.severity} onChange={(v) => set('severity', v)} />
-      <ToggleRow label="Only during working hours" value={draft.work_hours_only} onChange={(v) => set('work_hours_only', v)} />
+      {draft.action === 'restrict' && draft.kind === 'domain' ? (
+        <Text style={styles.hint}>This website stays blocked all the time. Working hours do not open it.</Text>
+      ) : (
+        <ToggleRow label="Only during working hours" value={draft.work_hours_only} onChange={(v) => set('work_hours_only', v)} />
+      )}
       <View style={[styles.row, { gap: 8 }]}>
         <Button small title="Save rule" onPress={save} loading={busy} />
         <Button small variant="ghost" title="Cancel" onPress={onCancel} />

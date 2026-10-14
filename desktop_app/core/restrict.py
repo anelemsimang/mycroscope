@@ -1,7 +1,8 @@
 """Minimises a restricted program that comes to the front. No administrator rights.
 
-A restricted website is refused by Google Chrome and Microsoft Edge while monitoring is on.
-That is done in core.siteblock. An alert is still recorded if the site is opened.
+A restricted website stays blocked in Google Chrome and Microsoft Edge the whole time the
+employee is signed in, including after hours and while tracking is paused. That is done in
+core.siteblock. An alert is still recorded if the site is opened.
 """
 
 import ctypes

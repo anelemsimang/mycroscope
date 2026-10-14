@@ -484,9 +484,7 @@ class Agent:
                             s.restrictions, sample.app_name, sample.process_name, now,
                             monitoring=True, paused=False, in_work_hours=s.schedule.during_work_hours(now))
 
-                self.siteblock.apply(
-                    s.restrictions, monitoring=block is None, paused=self.paused,
-                    in_work_hours=s.schedule.during_work_hours(now))
+                self.siteblock.apply(s.restrictions)
 
                 earliest = self.engine.session_started_at if self.engine else None
                 minutes = s.offline_prompt_minutes if isinstance(s.offline_prompt_minutes, int) else 10

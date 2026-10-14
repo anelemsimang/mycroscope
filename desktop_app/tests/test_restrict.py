@@ -73,17 +73,14 @@ class RestrictTests(unittest.TestCase):
         self.assertTrue(schedule.is_work_time(evening))
         self.assertFalse(schedule.during_work_hours(evening))
 
-    def test_a_website_is_blocked_only_while_monitoring(self):
+    def test_a_website_stays_blocked_when_paused_or_outside_working_hours(self):
         rules = parse_restrictions(RULES)
-        self.assertEqual(active_domains(rules, monitoring=True, paused=False, in_work_hours=True), ("facebook.com",))
-        self.assertEqual(active_domains(rules, monitoring=True, paused=True, in_work_hours=True), ())
-        self.assertEqual(active_domains(rules, monitoring=False, paused=False, in_work_hours=True), ())
+        self.assertEqual(active_domains(rules), ("facebook.com",))
         self.assertFalse(proxy_is_free({"ProxyEnable": 1, "AutoConfigURL": ""}))
         self.assertFalse(proxy_is_free({"ProxyEnable": 0, "AutoConfigURL": "http://proxy.example/pac"}))
         self.assertTrue(proxy_is_free({"ProxyEnable": 0, "AutoConfigURL": ""}))
         hours = parse_restrictions([{"kind": "domain", "pattern": "facebook.com", "work_hours_only": True}])
-        self.assertEqual(active_domains(hours, monitoring=True, paused=False, in_work_hours=False), ())
-        self.assertEqual(active_domains(hours, monitoring=True, paused=False, in_work_hours=True), ("facebook.com",))
+        self.assertEqual(active_domains(hours), ("facebook.com",))
 
     def test_the_proxy_refuses_the_named_site_and_lets_another_through(self):
         gate = SiteBlock.__new__(SiteBlock)

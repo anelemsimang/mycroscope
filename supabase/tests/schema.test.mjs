@@ -1487,7 +1487,8 @@ test('a restricted program is named in the notice, and a restricted website is r
     `select id from save_alert_rule(null, 'Facebook', 'domain', 'facebook.com', 'medium', true, true, 'restrict')`)).rows[0];
   const named = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
   assert.match(named.notice_text, /facebook\.com/);
-  assert.match(named.notice_text, /Google Chrome and Microsoft Edge refuse/);
+  assert.match(named.notice_text, /the whole time you are signed in/);
+  assert.doesNotMatch(named.notice_text, /facebook\.com \(working hours only\)/);
   assert.doesNotMatch(named.notice_text, /does not block the website/);
   await rejects(asUser(ctx.ownerAuth,
     `select save_alert_rule(null, 'Bad', 'app', 'nope.exe', 'low', false, true, 'block')`), /Alert or restrict/);
