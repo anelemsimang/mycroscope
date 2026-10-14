@@ -37,6 +37,7 @@ export default function Monitoring() {
       fileActivity: features.includes('file_activity'),
       workLocation: features.includes('work_location'),
       aiTools: features.includes('ai_tools'),
+      advisor: features.includes('work_advisor'),
       orgWide: manageableTeams(teams, managers, profile).orgWide,
     };
   }, [profile.organizationId]);
@@ -45,12 +46,13 @@ export default function Monitoring() {
   if (!data) return <Screen><ErrorBanner message={error ?? 'Could not load settings.'} onRetry={refresh} /></Screen>;
   return <MonitoringForm key={data.settings.updated_at} initial={data.settings} current={data.current}
     fileActivityAllowed={data.fileActivity} workLocationAllowed={data.workLocation}
-    aiToolsAllowed={data.aiTools} orgWide={data.orgWide} onSaved={refresh} />;
+    aiToolsAllowed={data.aiTools} advisorAllowed={data.advisor} orgWide={data.orgWide} onSaved={refresh} />;
 }
 
-function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAllowed, aiToolsAllowed, orgWide, onSaved }: {
+function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAllowed, aiToolsAllowed, advisorAllowed, orgWide, onSaved }: {
   initial: ComplianceSettings; current: { version: number; notice_text: string; published_at: string } | null;
-  fileActivityAllowed: boolean; workLocationAllowed: boolean; aiToolsAllowed: boolean; orgWide: boolean; onSaved: () => void;
+  fileActivityAllowed: boolean; workLocationAllowed: boolean; aiToolsAllowed: boolean; advisorAllowed: boolean;
+  orgWide: boolean; onSaved: () => void;
 }) {
   const profile = useProfile();
   const { aal, reloadService } = useSession();
@@ -245,6 +247,28 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
           disabled={!aiToolsAllowed && !draft.alert_unapproved_ai}
           onChange={(v) => set('alert_unapproved_ai', v)}
           hint="Included on Business, Enterprise, and the trial. The list of tools is kept by Mycroscope." />
+      </Card>
+
+      <Card title="Written advice">
+        <Text style={styles.hint}>
+          Insights lets a manager ask a question about trends, workload, capacity and software. The weekly note covers
+          the previous full week. Names are replaced with codes such as Person 1 before anything is sent to OpenAI in
+          the United States, and put back in the answer managers see. Pay figures are not sent. Employees are told in
+          the notice while this is on.
+        </Text>
+        {!advisorAllowed ? (
+          <Text style={[styles.hint, { color: colors.danger }]}>
+            Written advice is not included in your plan. Contact Mycroscope to upgrade.
+          </Text>
+        ) : null}
+        <ToggleRow label="Allow written advice" value={draft.advisor_enabled}
+          disabled={!advisorAllowed && !draft.advisor_enabled}
+          onChange={(v) => set('advisor_enabled', v)}
+          hint="Included on Business, Enterprise, and the trial. Stays off until you switch it on." />
+        <ToggleRow label="Email the weekly note to managers" value={draft.advisor_weekly_email}
+          disabled={!advisorAllowed && !draft.advisor_weekly_email}
+          onChange={(v) => set('advisor_weekly_email', v)}
+          hint="Owners and managers who can see that team. Uses the same email setup as the weekly digest." />
       </Card>
 
       <Card title="When monitoring happens">

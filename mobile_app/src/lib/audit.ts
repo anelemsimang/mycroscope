@@ -33,6 +33,8 @@ const SETTING_LABELS: Record<string, string> = {
   track_work_location: 'Office and remote days',
   office_days_per_week: 'Office days per week',
   alert_unapproved_ai: 'Unapproved AI tool alert',
+  advisor_enabled: 'Written advice',
+  advisor_weekly_email: 'Email the weekly note',
 };
 
 function settingValue(key: string, value: unknown): string {
@@ -145,6 +147,8 @@ export function describeAudit(
       return { actor, title: 'Set a team office-day target', detail: d.days == null ? 'Uses the company number' : `${str(d.days)} days a week` };
     case 'ai_tool_approval':
       return { actor, title: 'AI tool decision', detail: str(d.status) === 'unset' ? 'No decision' : str(d.status) };
+    case 'advisor_question':
+      return { actor, title: 'Asked for written advice', detail: str(d.question) };
     default:
       return { actor, title: e.action.replace(/_/g, ' '), detail: '' };
   }

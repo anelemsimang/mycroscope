@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   quote, safeReturnUrl, signTerms, termsFromTransaction, verifyPaystackSignature, verifyTerms,
 } from './billing.ts';
+import { pseudonymize, restoreNames, scrubQuestion } from './advisor.ts';
 import { clientAddress, isPublicAddress } from './ip.ts';
 import { renderAlert, renderDigest } from './email.ts';
 import {
@@ -171,4 +172,22 @@ test('deliver posts to the channel and reports failures', async () => {
     server.close();
   }
   assert.equal(await deliver({ ...channel, url: `http://127.0.0.1:${port}/hook` }, ALERTS, ''), 'Could not connect');
+});
+
+test('advice replaces names before sending and puts them back afterwards', () => {
+  const people = [
+    { name: 'Sipho Worker', pseudo: 'Person 1' },
+    { name: 'Ann', pseudo: 'Person 10' },
+  ];
+  assert.equal(scrubQuestion('How is Sipho Worker doing compared with Ann?', people),
+    'How is Person 1 doing compared with Person 10?');
+  const sent = pseudonymize([
+    { name: 'Sipho Worker', employee_id: 'secret', productive_seconds: 3600, annual_salary: 100 },
+    { name: 'Excel', users: 2 },
+  ], people);
+  assert.deepEqual(sent, [
+    { person: 'Person 1', productive_hours: 1 },
+    { name: 'Excel', users: 2 },
+  ]);
+  assert.equal(restoreNames('Person 10 worked more than Person 1.', people), 'Ann worked more than Sipho Worker.');
 });

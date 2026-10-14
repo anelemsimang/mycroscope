@@ -6,7 +6,7 @@ import {
   BarRow, Button, Card, Empty, ErrorBanner, Field, InnerTabs, Loading, Screen, Segmented, StackedBar, StatGrid, colors, styles,
 } from '@/components/ui';
 import {
-  api, errorMessage, type AiAdoptionRow, type AiCatalogTool, type AiPersonUsage, type CapacityRow, type Feature, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
+  api, errorMessage, type AdvisorQuestion, type AiAdoptionRow, type AiCatalogTool, type AiPersonUsage, type CapacityRow, type CoachingNote, type Feature, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
   type WorkloadStatus,
 } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
@@ -17,7 +17,7 @@ import { manageableTeams } from '@/lib/scope';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
-type Tab = 'trends' | 'workload' | 'capacity' | 'software' | 'where' | 'ai';
+type Tab = 'trends' | 'workload' | 'capacity' | 'software' | 'where' | 'ai' | 'advice';
 type Period = 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_30' | 'last_90' | 'last_365';
 
 const ALL = '__all__';
@@ -32,11 +32,11 @@ const PERIODS: { value: Period; label: string }[] = [
 ];
 const TAB_FEATURE: Record<Tab, Feature> = {
   trends: 'trends', workload: 'workload', capacity: 'workload', software: 'software_usage', where: 'work_location',
-  ai: 'ai_tools',
+  ai: 'ai_tools', advice: 'work_advisor',
 };
 const TAB_LABEL: Record<Tab, string> = {
   trends: 'Trends', workload: 'Workload', capacity: 'Capacity', software: 'Software', where: 'Office days',
-  ai: 'AI tools',
+  ai: 'AI tools', advice: 'Advice',
 };
 
 /** The "last N days" periods end yesterday so a half-finished day doesn't drag the averages down. */
@@ -110,6 +110,7 @@ export default function Insights() {
       {current === 'software' ? <Software from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
       {current === 'where' ? <Where from={range.from} to={range.to} team={teamId} /> : null}
       {current === 'ai' ? <AiTools from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
+      {current === 'advice' ? <Advice from={range.from} to={range.to} team={teamId} /> : null}
     </Screen>
   );
 }
@@ -358,6 +359,83 @@ function AiToolBlock({ row, people }: { row: AiAdoptionRow; people: AiPersonUsag
             : ''}
         </Text>
       ))}
+    </View>
+  );
+}
+
+// ---- Advice --------------------------------------------------------------------
+
+function Advice({ from, to, team }: { from: Ymd; to: Ymd; team: string | null }) {
+  const { data, error, loading, refresh } = useAsync(async () => {
+    const [questions, notes] = await Promise.all([api.advisorQuestions(), api.coachingNotes()]);
+    return { questions, notes };
+  }, []);
+  const [question, setQuestion] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function ask() {
+    setErr(null);
+    if (question.trim().length < 3) return setErr('Ask a question of at least a few words.');
+    setBusy(true);
+    try {
+      await api.askAdvisor(question.trim(), from, to, team);
+      setQuestion('');
+      refresh();
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+  if (loading && !data) return <Loading />;
+  if (!data) return null;
+  return (
+    <>
+      <Card title="Ask about this period">
+        <Text style={styles.hint}>
+          The answer uses the trends, workload, capacity and software reports for {formatDay(from)} to {formatDay(to)}.
+          Names are replaced with codes before the question is sent to OpenAI in the United States, and put back in the
+          answer below. Pay figures are not sent. Every number in the answer should be one of those report figures.
+          Turn this on under Monitoring & privacy.
+        </Text>
+        <Field label="Question" value={question} onChangeText={setQuestion} multiline maxLength={800}
+          placeholder="Who was over their goal last week?" />
+        {err ? <ErrorBanner message={err} /> : null}
+        <Button title="Ask" onPress={ask} loading={busy} />
+      </Card>
+      <Card title="Answers">
+        {data.questions.length === 0 ? <Empty text="No questions yet." /> : null}
+        {data.questions.map((q) => <Answer key={q.id} row={q} />)}
+      </Card>
+      <Card title="Weekly notes">
+        <Text style={styles.hint}>
+          A note is written each week for the previous Monday to Sunday, after written advice is switched on.
+          It can also be emailed to managers.
+        </Text>
+        {data.notes.length === 0 ? <Empty text="No weekly note yet." /> : null}
+        {data.notes.map((n) => <Note key={n.id} row={n} />)}
+      </Card>
+    </>
+  );
+}
+
+function Answer({ row }: { row: AdvisorQuestion }) {
+  return (
+    <View style={{ paddingVertical: 8, gap: 2 }}>
+      <Text style={styles.rowText}>{row.question}</Text>
+      <Text style={styles.hint}>{row.answer}</Text>
+    </View>
+  );
+}
+
+function Note({ row }: { row: CoachingNote }) {
+  return (
+    <View style={{ paddingVertical: 8, gap: 2 }}>
+      <Text style={styles.rowText}>{row.team_name ?? 'Whole company'} · week of {formatDay(row.week_start)}</Text>
+      <Text style={styles.hint}>{row.body}</Text>
     </View>
   );
 }

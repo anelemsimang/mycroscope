@@ -1386,6 +1386,54 @@ test('AI tools: operator list, adoption, and an alert when a tool is not approve
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 
+test('written advice: off until switched on, and the weekly pack hides names', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await rejects(asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
+    [JSON.stringify({ advisor_enabled: true })]), /not included/);
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
+    [JSON.stringify({ advisor_enabled: true })]);
+  const notice = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.match(notice.notice_text, /OpenAI in the United States/);
+  await rejects(asUser(ctx.empAuth, `select save_advisor_question('How is the week?', 'Fine.', null)`), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth, 'select advisor_pack($1, null, current_date - 3, current_date)', [ctx.orgId]),
+    /permission denied/);
+
+  const day = `(now() at time zone 'Africa/Johannesburg')::date - 3`;
+  await db.query(`insert into daily_usage (employee_id, day, app_name, domain, organization_id, active_seconds)
+    values ($1, ${day}, 'Google Chrome', '', $2, 3600)
+    on conflict (employee_id, day, app_name, domain) do update set active_seconds = excluded.active_seconds`,
+    [ctx.empId, ctx.orgId]);
+  const pack = (await asRole('service_role', null, () => db.query(
+    `select advisor_pack($1, null, ${day}, ${day}) as pack`, [ctx.orgId]))).rows[0].pack;
+  assert.doesNotMatch(JSON.stringify(pack.model), /Sipho|Thandi|Mary/);
+  assert.match(JSON.stringify(pack.names), /Sipho/);
+  assert.equal(pack.model.software[0].name, 'Google Chrome');
+
+  const id = (await asUser(ctx.ownerAuth,
+    `select save_advisor_question('How is the week?', 'Person 1 worked 1 hour.', null) as id`)).rows[0].id;
+  const mine = (await asUser(ctx.ownerAuth, 'select question from list_advisor_questions()')).rows;
+  assert.ok(mine.some((r) => r.question === 'How is the week?'));
+  const mary = (await asUser(ctx.mgrAuth, 'select id from list_advisor_questions()')).rows;
+  assert.ok(!mary.some((r) => r.id === id));
+  await asRole('service_role', null, () => db.query(
+    `select save_coaching_note($1, null, ${day}, 'A short note.')`, [ctx.orgId]));
+  const notes = (await asUser(ctx.ownerAuth, 'select body from list_coaching_notes()')).rows;
+  assert.ok(notes.some((r) => r.body === 'A short note.'));
+  await rejects(asAnon('select list_coaching_notes()'), /permission denied/);
+
+  await db.query('delete from advisor_questions where organization_id = $1', [ctx.orgId]);
+  await db.query('delete from coaching_notes where organization_id = $1', [ctx.orgId]);
+  await db.query(`delete from daily_usage where employee_id = $1 and day = ${day} and app_name = 'Google Chrome' and domain = ''`,
+    [ctx.empId]);
+  await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
+    [JSON.stringify({ advisor_enabled: false })]);
+  const quiet = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.doesNotMatch(quiet.notice_text, /OpenAI/);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
 test('the sign-in reminder migration republishes every notice without changing settings', async () => {
   const before = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot from monitoring_policies order by version desc limit 1')).rows[0];
   await db.exec(readFileSync(path.join(migrationsDir, '20261010090000_notice_sign_in_reminders.sql'), 'utf8'));

@@ -130,6 +130,8 @@ export interface ComplianceSettings {
   /** Null when the company has not set a weekly office-day target. */
   office_days_per_week: number | null;
   alert_unapproved_ai: boolean;
+  advisor_enabled: boolean;
+  advisor_weekly_email: boolean;
   require_mfa: boolean;
   information_officer_name: string | null;
   information_officer_email: string | null;
@@ -140,7 +142,7 @@ const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track
   'allow_pause,retention_days,summary_retention_days,notice_custom_text,tracking_schedule,work_days,work_start,' +
   'work_end,flag_after_hours_use,detect_tampering,detect_removable_media,detect_cloud_sync,detect_network_drives,' +
   'file_retention_days,ask_offline_reason,offline_prompt_minutes,productive_offline_reasons,' +
-  'track_work_location,office_days_per_week,alert_unapproved_ai,require_mfa,updated_at';
+  'track_work_location,office_days_per_week,alert_unapproved_ai,advisor_enabled,advisor_weekly_email,require_mfa,updated_at';
 
 export type ServiceLevel = 'full' | 'read_only';
 export interface ServiceStatus {
@@ -181,13 +183,15 @@ export interface AiPersonUsage {
   before_hours: number | null; after_hours: number | null; before_days: number | null; after_days: number | null;
 }
 export interface OperatorAiTool { id: string; name: string; domains: string[]; app_names: string[]; enabled: boolean }
+export interface AdvisorQuestion { id: string; question: string; answer: string; team_id: string | null; created_at: string }
+export interface CoachingNote { id: string; team_id: string | null; team_name: string | null; week_start: Ymd; body: string; created_at: string }
 
 export type Category = 'productive' | 'neutral' | 'unproductive';
 export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category; team_id: string | null }
 
 /** Plan features (see plan_features in the database). */
 export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage'
-  | 'alert_rules' | 'channels' | 'file_activity' | 'api' | 'work_location' | 'ai_tools';
+  | 'alert_rules' | 'channels' | 'file_activity' | 'api' | 'work_location' | 'ai_tools' | 'work_advisor';
 
 export type Severity = 'low' | 'medium' | 'high';
 export interface AlertRule {
@@ -674,6 +678,16 @@ export const api = {
       numeric(await rpc<AiPersonUsage[]>('get_ai_person_usage', { p_from: from, p_to: to, p_team: team ?? null }),
         ['days_used', 'days_per_week']),
       ['before_hours', 'after_hours', 'before_days', 'after_days']),
+  advisorQuestions: () => rpc<AdvisorQuestion[]>('list_advisor_questions'),
+  coachingNotes: () => rpc<CoachingNote[]>('list_coaching_notes'),
+  askAdvisor: async (question: string, from: Ymd, to: Ymd, team?: string | null) => {
+    const { data, error } = await supabase.functions.invoke('work-advisor', {
+      body: { question, from, to, team: team ?? null },
+    });
+    if (error) throw error;
+    if (!data?.answer) throw new Error(data?.error ?? 'No answer was returned.');
+    return String(data.answer);
+  },
   deleteTeam: (id: string) => rpc<void>('delete_team', { p_team: id }),
   setEmployeeTeam: (employee: string, team: string | null) => rpc<void>('set_employee_team', { p_employee: employee, p_team: team }),
   setTeamManagers: (team: string, managers: string[]) => rpc<void>('set_team_managers', { p_team: team, p_managers: managers }),

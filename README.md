@@ -269,6 +269,27 @@ the tool counts toward those hours when the tool's category is productive.
 Monitoring & privacy -> AI tools turns on an alert for tools marked not approved. It stays off until switched on,
 and the employee notice gains a sentence only then. The desktop app does not change for this.
 
+`20261020090000_work_advisor.sql` (apply after the one above) adds **written advice** on Business, Enterprise, and the
+trial. It stays off until an owner switches it on under Monitoring & privacy. A manager asks a question in
+Insights -> Advice. The answer comes from OpenAI, which can only call the existing trends, workload, capacity and
+software reports, using that manager's own sign-in so a team manager only sees their teams. The model does not write
+SQL. Names are replaced with codes such as Person 1 before the question or the figures are sent, and put back in the
+answer stored for the company. Pay figures are left out. The employee notice names OpenAI, the United States, and
+what is sent, and only while the feature is on.
+
+A weekly note for the previous Monday to Sunday is written for each team, and one for the whole company. Emailing it
+to managers is a separate switch. Deploy the function with JWT verification off; it rejects callers that are neither
+a signed-in user nor the existing cron secret:
+
+```powershell
+supabase functions deploy work-advisor --no-verify-jwt
+```
+
+Set `OPENAI_API_KEY` in Supabase secrets (`supabase secrets set OPENAI_API_KEY=...`). An optional `OPENAI_MODEL`
+overrides the default `gpt-4.1-mini`. Do not put the key in the app. Then run `supabase/setup/schedule_advisor.sql`
+in the SQL editor after replacing the project URL. The same `CRON_SECRET` as the manager emails is reused. Weekly
+email uses the existing `RESEND_API_KEY` and `EMAIL_FROM`. The desktop app does not change for this.
+
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.
 
