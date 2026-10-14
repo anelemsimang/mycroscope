@@ -112,6 +112,7 @@ class SyncService:
         self._push_segments()
         self._push_events()
         self._push_file_events()
+        self._push_offline_entries()
         if force_status or now - self._last_status >= STATUS_INTERVAL_SECONDS:
             self.push_status()
             self._last_status = now
@@ -277,6 +278,29 @@ class SyncService:
             if len(events) < 500:
                 return
 
+    def _push_offline_entries(self) -> None:
+        self.store.drop_stale_offline_entries(self.clock.now() - timedelta(days=13))
+        entries = self.store.pending_offline_entries(self.identity.employee_id, 200)
+        if not entries:
+            return
+        rows = [{
+            **e, "started_at": to_server_time(e["started_at"]), "ended_at": to_server_time(e["ended_at"]),
+        } for e in entries]
+        try:
+            self.api.upsert("offline_entries", rows, on_conflict="id", ignore_duplicates=True)
+            self.store.mark_offline_uploaded(e["id"] for e in entries)
+        except ApiError as exc:
+            log.info("Time-away batch rejected (%s); retrying one by one", exc)
+            for row in rows:
+                try:
+                    self.api.upsert("offline_entries", [row], on_conflict="id", ignore_duplicates=True)
+                    self.store.mark_offline_uploaded([row["id"]])
+                except ApiError as row_exc:
+                    if row_exc.code not in PERMANENT_CODES:
+                        raise
+                    log.info("Time-away answer %s dropped: %s", row["id"], row_exc.code)
+                    self.store.drop_offline_entries([row["id"]])
+
     def push_status(self, state_override: Optional[str] = None) -> None:
         i = self.identity
         live = self.status_provider()
@@ -312,6 +336,14 @@ class SyncService:
             "device_id": i.device_id, "occurred_at": at or self.clock.now(), "event_type": event_type,
             "details": details or {},
         })
+
+    def record_offline_entry(self, entry: dict[str, Any]) -> None:
+        i = self.identity
+        self.store.add_offline_entry({
+            **entry, "id": str(uuid.uuid4()), "organization_id": i.organization_id,
+            "employee_id": i.employee_id, "device_id": i.device_id,
+        })
+        self.poke()
 
     def record_file_event(self, event: dict[str, Any]) -> None:
         i = self.identity

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { addDays, csvEscape, dayStartUtc, formatDuration, periodRange, todayIn, weekdayIndex } from './format.ts';
+import { addDays, csvEscape, dayStartUtc, formatDuration, offlineSeconds, offlineSummary, periodRange, todayIn, weekdayIndex } from './format.ts';
 
 test('local midnight as a UTC instant, including DST changes', () => {
   assert.equal(dayStartUtc('2026-10-06', 'Africa/Johannesburg'), '2026-10-05T22:00:00.000Z');
@@ -30,6 +30,13 @@ test('period ranges', () => {
   assert.deepEqual(periodRange('this_month', today), { from: '2026-10-01', to: '2026-10-07' });
   assert.deepEqual(periodRange('last_month', today), { from: '2026-09-01', to: '2026-09-30' });
   assert.deepEqual(periodRange('yesterday', '2026-01-01'), { from: '2025-12-31', to: '2025-12-31' });
+});
+
+test('time away from the computer is described from the four answers', () => {
+  const row = { meeting_seconds: 2700, call_seconds: 0, break_seconds: 900, other_seconds: 0 };
+  assert.equal(offlineSeconds(row), 3600);
+  assert.equal(offlineSummary(row), '45m in meetings, 15m on breaks');
+  assert.equal(offlineSummary({}), '');
 });
 
 test('durations', () => {

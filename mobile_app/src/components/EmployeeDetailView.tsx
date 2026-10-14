@@ -9,11 +9,12 @@ import {
   StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
 import { DESTINATIONS, formatBytes } from '@/lib/alerts';
-import { api, errorMessage, type EmployeeRow, type FileEvent } from '@/lib/api';
+import { api, errorMessage, type EmployeeRow, type FileEvent, type OfflineEntry } from '@/lib/api';
 import { notify } from '@/lib/dialog';
 import { shareCsv } from '@/lib/export';
 import {
-  PERIOD_LABELS, addDays, formatDateTime, formatDay, formatDuration, formatRelative, formatTime, periodRange, toCsv, todayIn,
+  PERIOD_LABELS, addDays, dayStartUtc, formatDateTime, formatDay, formatDuration, formatRelative, formatTime,
+  offlineSeconds, offlineSummary, periodRange, toCsv, todayIn,
   type PeriodKey,
 } from '@/lib/format';
 import { useAsync } from '@/lib/useAsync';
@@ -156,7 +157,9 @@ function Overview({ id, timezone, today, status }: { id: string; timezone: strin
     return { day: todayRows[0], week: weekRows };
   }, [id, today, week.from]);
 
-  const sum = (k: 'active_seconds' | 'idle_seconds' | 'paused_seconds') => (data?.week ?? []).reduce((a, d) => a + d[k], 0);
+  const sum = (k: 'active_seconds' | 'idle_seconds' | 'paused_seconds' | 'productive_offline_seconds') =>
+    (data?.week ?? []).reduce((a, d) => a + d[k], 0);
+  const weekAway = (data?.week ?? []).reduce((a, d) => a + offlineSeconds(d), 0);
   const d = data?.day;
   return (
     <>
@@ -177,6 +180,14 @@ function Overview({ id, timezone, today, status }: { id: string; timezone: strin
               ? `First activity ${formatTime(d.first_activity_at, timezone)} · last ${formatTime(d.last_activity_at, timezone)}`
               : 'No activity recorded today'}
           </Text>
+          {offlineSeconds(d ?? {}) > 0 ? (
+            <Text style={[styles.hint, { textAlign: 'center' }]}>
+              Time away: {offlineSummary(d ?? {})}
+              {(d?.productive_offline_seconds ?? 0) > 0
+                ? ` · ${formatDuration(d?.productive_offline_seconds)} counted as productive`
+                : ''}
+            </Text>
+          ) : null}
           <SectionTitle>This Week</SectionTitle>
           <StatGrid items={[
             { label: 'Active', value: formatDuration(sum('active_seconds')), color: stateColor.active },
@@ -184,6 +195,14 @@ function Overview({ id, timezone, today, status }: { id: string; timezone: strin
             { label: 'Paused', value: formatDuration(sum('paused_seconds')), color: stateColor.paused },
             { label: 'Days active', value: String(data.week.filter((x) => x.active_seconds > 0).length) },
           ]} />
+          {weekAway > 0 ? (
+            <Text style={[styles.hint, { textAlign: 'center' }]}>
+              Time away this week: {formatDuration(weekAway)}
+              {sum('productive_offline_seconds') > 0
+                ? ` · ${formatDuration(sum('productive_offline_seconds'))} counted as productive`
+                : ''}
+            </Text>
+          ) : null}
         </>
       ) : null}
     </>
@@ -291,11 +310,13 @@ function History({ id, name, timezone, today, isSelf }: { id: string; name: stri
     try {
       const rows = data.map((d) => [
         d.day, d.active_seconds, d.idle_seconds, d.paused_seconds, d.away_seconds,
+        d.meeting_seconds, d.call_seconds, d.break_seconds, d.other_seconds, d.productive_offline_seconds,
         formatTime(d.first_activity_at, timezone), formatTime(d.last_activity_at, timezone),
       ]);
       if (!isSelf) await api.logAccess(id, 'exported_data', { from, to: today, format: 'csv', scope: 'daily' });
       await shareCsv(`mycroscope_${name}_${from}_${today}`, toCsv(
-        ['date', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'first_activity', 'last_activity'], rows));
+        ['date', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'meeting_seconds', 'call_seconds',
+          'break_seconds', 'other_seconds', 'productive_offline_seconds', 'first_activity', 'last_activity'], rows));
     } catch (e) {
       notify('Export failed', errorMessage(e));
     } finally {
@@ -320,8 +341,45 @@ function History({ id, name, timezone, today, isSelf }: { id: string; name: stri
         </Card>
       ) : null}
       <Button title="Export daily summaries (CSV)" variant="secondary" onPress={exportCsv} loading={exporting} disabled={!data} />
+      <OfflineAnswers id={id} timezone={timezone} from={dayStartUtc(from, timezone)} to={dayStartUtc(addDays(today, 1), timezone)} />
       <FileActivity id={id} timezone={timezone} isSelf={isSelf} />
     </>
+  );
+}
+
+const OFFLINE_REASON = { meeting: 'Meeting', call: 'Call', break: 'Break', other: 'Other' } as const;
+
+function OfflineAnswers({ id, timezone, from, to }: { id: string; timezone: string; from: string; to: string }) {
+  const { data, error, loading, refresh } = useAsync(() => api.offlineEntries(id, from, to), [id, from, to]);
+  return (
+    <Card title="Time away from the computer">
+      {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
+      {loading && !data ? <Loading /> : null}
+      {data && data.length === 0 ? (
+        <Empty text="No answers in the last 30 days. The desktop app asks only when your company has switched this on." />
+      ) : null}
+      {data?.map((r) => <OfflineRow key={r.id} row={r} timezone={timezone} />)}
+      <Text style={styles.hint}>
+        This is what the person said an idle or away stretch was. It is not extra time on top of idle and away.
+      </Text>
+    </Card>
+  );
+}
+
+function OfflineRow({ row, timezone }: { row: OfflineEntry; timezone: string }) {
+  const seconds = Math.max(0, (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000);
+  return (
+    <View style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' }}>
+      <Text style={styles.rowText}>
+        <Text style={{ fontWeight: '600' }}>{OFFLINE_REASON[row.reason] ?? row.reason}</Text>
+        {` · ${formatDuration(seconds)}`}
+        {row.note ? ` · ${row.note}` : ''}
+      </Text>
+      <Text style={styles.hint}>
+        {formatTime(row.started_at, timezone)}–{formatTime(row.ended_at, timezone)}
+        {row.hostname ? ` · ${row.hostname}` : ''}
+      </Text>
+    </View>
   );
 }
 

@@ -38,6 +38,13 @@ export interface DailyTotal {
   paused_seconds: number;
   first_activity_at: string | null;
   last_activity_at: string | null;
+  /** Answers about idle or away time. They are not extra time on top of idle and away. */
+  meeting_seconds: number;
+  call_seconds: number;
+  break_seconds: number;
+  other_seconds: number;
+  /** The part of those answers the company currently counts as productive. */
+  productive_offline_seconds: number;
 }
 
 export interface AppTotal { app_name: string; active_seconds: number; idle_seconds: number; last_used_at: string }
@@ -115,6 +122,10 @@ export interface ComplianceSettings {
   detect_cloud_sync: boolean;
   detect_network_drives: boolean;
   file_retention_days: number;
+  ask_offline_reason: boolean;
+  offline_prompt_minutes: number;
+  /** Which answers are added to productive time. Applied to past days as well. */
+  productive_offline_reasons: OfflineReason[];
   require_mfa: boolean;
   information_officer_name: string | null;
   information_officer_email: string | null;
@@ -124,7 +135,7 @@ export interface ComplianceSettings {
 const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track_full_urls,idle_threshold_seconds,' +
   'allow_pause,retention_days,summary_retention_days,notice_custom_text,tracking_schedule,work_days,work_start,' +
   'work_end,flag_after_hours_use,detect_tampering,detect_removable_media,detect_cloud_sync,detect_network_drives,' +
-  'file_retention_days,require_mfa,updated_at';
+  'file_retention_days,ask_offline_reason,offline_prompt_minutes,productive_offline_reasons,require_mfa,updated_at';
 
 export type ServiceLevel = 'full' | 'read_only';
 export interface ServiceStatus {
@@ -171,6 +182,16 @@ export interface ApiKey {
   id: string; name: string; key_prefix: string; created_at: string; last_used_at: string | null;
   revoked_at: string | null; created_by_name: string | null;
 }
+export type OfflineReason = 'meeting' | 'call' | 'break' | 'other';
+export interface OfflineEntry {
+  id: string;
+  started_at: string;
+  ended_at: string;
+  reason: OfflineReason;
+  note: string | null;
+  hostname: string | null;
+}
+
 export interface FileEvent {
   id: string; occurred_at: string; event_type: 'drive_connected' | 'phone_connected' | 'file_copied';
   destination: 'removable' | 'phone' | 'cloud' | 'network'; label: string | null; file_name: string | null;
@@ -198,6 +219,10 @@ export interface TrendPoint {
   idle_seconds: number;
   productive_seconds: number;
   unproductive_seconds: number;
+  /** All answers about time away from the computer, including breaks. */
+  offline_seconds: number;
+  /** The part of that time in reasons the company counts as productive. Not included in productive_seconds. */
+  productive_offline_seconds: number;
 }
 export interface SoftwareUsage {
   name: string;
@@ -225,6 +250,8 @@ export interface WorkloadRow {
   /** Productive time per day worked as a percentage of the daily goal. */
   utilisation: number | null;
   status: WorkloadStatus;
+  /** Explained time away from the computer. productive_seconds already includes the productive part of it. */
+  offline_seconds: number;
 }
 export interface CapacityRow {
   team_id: string | null;
@@ -392,7 +419,8 @@ export const api = {
 
   dailyTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
     numeric(await rpc<DailyTotal[]>('get_daily_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
-      ['active_seconds', 'idle_seconds', 'away_seconds', 'paused_seconds']),
+      ['active_seconds', 'idle_seconds', 'away_seconds', 'paused_seconds', 'meeting_seconds', 'call_seconds',
+        'break_seconds', 'other_seconds', 'productive_offline_seconds']),
 
   appTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
     numeric(await rpc<AppTotal[]>('get_app_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
@@ -669,7 +697,8 @@ export const api = {
   trend: async (from: Ymd, to: Ymd, granularity: Granularity, team: string | null = null, employee: string | null = null) =>
     numeric(
       await rpc<TrendPoint[]>('get_trend', { p_from: from, p_to: to, p_granularity: granularity, p_team: team, p_employee: employee }),
-      ['active_seconds', 'idle_seconds', 'productive_seconds', 'unproductive_seconds'],
+      ['active_seconds', 'idle_seconds', 'productive_seconds', 'unproductive_seconds',
+        'offline_seconds', 'productive_offline_seconds'],
     ),
   softwareUsage: async (from: Ymd, to: Ymd, kind: 'app' | 'domain', team: string | null = null) =>
     nullableNumeric(
@@ -684,7 +713,7 @@ export const api = {
   workload: async (from: Ymd, to: Ymd, team: string | null = null) =>
     nullableNumeric(
       numeric(await rpc<WorkloadRow[]>('get_workload', { p_from: from, p_to: to, p_team: team }),
-        ['active_seconds', 'productive_seconds']),
+        ['active_seconds', 'productive_seconds', 'offline_seconds']),
       ['goal_hours', 'utilisation'],
     ),
   capacity: async (from: Ymd, to: Ymd) =>
@@ -746,6 +775,9 @@ export const api = {
   revokeApiKey: (id: string) => rpc<void>('revoke_api_key', { p_id: id }),
 
   // ---- file activity (every view by someone other than the person is audited) ---
+  offlineEntries: (employee: string, fromIso: string, toIso: string) =>
+    rpc<OfflineEntry[]>('get_offline_entries', { p_employee: employee, p_from: fromIso, p_to: toIso }),
+
   fileActivity: async (employee: string, fromIso: string, toIso: string) =>
     nullableNumeric(
       numeric(await rpc<FileEvent[]>('get_file_activity', { p_employee: employee, p_from: fromIso, p_to: toIso }), ['file_count']),

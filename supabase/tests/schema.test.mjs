@@ -1166,6 +1166,102 @@ test('Slack, Teams and webhook channels; read-only API keys', async () => {
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 
+test('time away from the computer: notice, answers, reports and deletion', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  const save = (settings) => asUser(ctx.ownerAuth,
+    `select version from save_compliance_settings($1, 'Thandi Owner', 'privacy@acme.co.za')`, [JSON.stringify(settings)]);
+  const upload = (row) => asUser(ctx.empAuth,
+    `insert into offline_entries (id, organization_id, employee_id, device_id, started_at, ended_at, reason, note)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [randomUUID(), ctx.orgId, ctx.empId, ctx.deviceId, row.start, row.end, row.reason, row.note ?? null]);
+
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await rejects(upload({ start: minutesAgo(40), end: minutesAgo(10), reason: 'meeting' }), /row-level security/,
+    'nothing is accepted while the question is off');
+  await save({ ask_offline_reason: true, offline_prompt_minutes: 10, productive_offline_reasons: ['meeting', 'call'] });
+  const notice = (await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()')).rows[0];
+  assert.match(notice.notice_text, /asks what you were doing/);
+  assert.match(notice.notice_text, /10 minutes or more/);
+  assert.match(notice.notice_text, /Counted as productive time: meetings, calls\./);
+  assert.equal(notice.settings.ask_offline_reason, true);
+  await rejects(save({ offline_prompt_minutes: 0 }), /1 and 120/);
+  await rejects(save({ productive_offline_reasons: ['lunch'] }), /Unknown reason/);
+
+  const meeting = { start: minutesAgo(40), end: minutesAgo(10), reason: 'meeting', note: 'Client workshop' };
+  const brk = { start: minutesAgo(90), end: minutesAgo(70), reason: 'break', note: null };
+  await upload(meeting);
+  await upload(brk);
+  await rejects(upload({ start: minutesAgo(30), end: minutesAgo(20), reason: 'call' }), /overlap|exclusion|23P01/);
+  await rejects(upload({ start: minutesAgo(15), end: minutesAgo(14), reason: 'other', note: 'x'.repeat(201) }), /check|constraint/);
+  await rejects(asUser(ctx.empAuth, 'select * from offline_entries'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, 'select * from offline_entries'), /permission denied/);
+  await rejects(asAnon(
+    `insert into offline_entries (id, organization_id, employee_id, device_id, started_at, ended_at, reason)
+     values ($1, $2, $3, $4, now() - interval '20 minutes', now() - interval '10 minutes', 'meeting')`,
+    [randomUUID(), ctx.orgId, ctx.empId, ctx.deviceId]), /permission denied/);
+
+  const seen = await asUser(ctx.ownerAuth,
+    `select reason, note, hostname from get_offline_entries($1, now() - interval '1 day', now() + interval '1 hour') order by started_at`,
+    [ctx.empId]);
+  assert.deepEqual(seen.rows.map((r) => r.reason), ['break', 'meeting']);
+  assert.equal(seen.rows[1].note, 'Client workshop');
+  assert.equal(seen.rows[1].hostname, 'LAPTOP-01');
+  await asUser(ctx.empAuth,
+    `select reason from get_offline_entries($1, now() - interval '1 day', now())`, [ctx.empId]);
+  await asUser(ctx.mgrAuth,
+    `select reason from get_offline_entries($1, now() - interval '1 day', now())`, [ctx.empId]);
+  await rejects(asUser(ctx.otherOwnerAuth,
+    `select reason from get_offline_entries($1, now() - interval '1 day', now())`, [ctx.empId]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth,
+    `select * from get_offline_entries($1, now() - interval '200 days', now())`, [ctx.empId]), /at most 93 days/);
+
+  const totals = (await asUser(ctx.ownerAuth, `select
+      coalesce(sum(meeting_seconds), 0)::int as meeting, coalesce(sum(break_seconds), 0)::int as break,
+      coalesce(sum(productive_offline_seconds), 0)::int as productive
+    from get_daily_totals($1, ((now() at time zone 'Africa/Johannesburg')::date - 1),
+                              (now() at time zone 'Africa/Johannesburg')::date)`, [ctx.empId])).rows[0];
+  assert.equal(Number(totals.meeting), 1800);
+  assert.equal(Number(totals.break), 1200);
+  assert.equal(Number(totals.productive), 1800, 'breaks are not productive unless the company says so');
+  const byProject = (await asUser(ctx.ownerAuth, `select coalesce(sum(meeting_seconds), 0)::int as meeting
+    from get_daily_totals($1, ((now() at time zone 'Africa/Johannesburg')::date - 1),
+                              (now() at time zone 'Africa/Johannesburg')::date, $2)`,
+    [ctx.empId, ctx.projectId])).rows[0];
+  assert.equal(Number(byProject.meeting), 0, 'a project report leaves time away out');
+
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  const from = `(now() at time zone 'Africa/Johannesburg')::date - 1`;
+  const to = `(now() at time zone 'Africa/Johannesburg')::date`;
+  const trend = (await asUser(ctx.ownerAuth, `select
+      coalesce(sum(productive_seconds), 0)::int as computer, coalesce(sum(offline_seconds), 0)::int as off,
+      coalesce(sum(productive_offline_seconds), 0)::int as prod_off
+    from get_trend(${from}, ${to}, 'day', null, $1)`, [ctx.empId])).rows[0];
+  assert.equal(Number(trend.off), 3000);
+  assert.equal(Number(trend.prod_off), 1800);
+  const load = (await asUser(ctx.ownerAuth, `select productive_seconds::int as p, offline_seconds::int as off
+    from get_workload(${from}, ${to}) where employee_id = $1`, [ctx.empId])).rows[0];
+  assert.equal(Number(load.off), 3000);
+  assert.equal(Number(load.p), Number(trend.computer) + 1800, 'the goal comparison includes the meeting');
+  const apiRow = (await asRole('service_role', null, () => db.query(
+    `select coalesce(sum(offline_seconds), 0)::int as off, coalesce(sum(productive_offline_seconds), 0)::int as prod
+     from api_daily_totals($1, ${from}, ${to}) where employee_id = $2`, [ctx.orgId, ctx.empId]))).rows[0];
+  assert.equal(Number(apiRow.off), 3000);
+  assert.equal(Number(apiRow.prod), 1800);
+
+  await asUser(ctx.ownerAuth, `select delete_activity($1, now() - interval '3 hours', now(), 'Removing test answers')`, [ctx.empId]);
+  const left = (await db.query('select count(*)::int as n from offline_entries where employee_id = $1', [ctx.empId])).rows[0];
+  assert.equal(left.n, 0);
+  const audit = (await db.query(
+    `select details from audit_log where action = 'activity_deleted' and target_id = $1 order by id desc limit 1`,
+    [ctx.empId])).rows[0];
+  assert.equal(Number(audit.details.offline_entries), 2);
+
+  await save({ ask_offline_reason: false });
+  const off = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.doesNotMatch(off.notice_text, /asks what you were doing/);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
 test('the sign-in reminder migration republishes every notice without changing settings', async () => {
   const before = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot from monitoring_policies order by version desc limit 1')).rows[0];
   await db.exec(readFileSync(path.join(migrationsDir, '20261010090000_notice_sign_in_reminders.sql'), 'utf8'));

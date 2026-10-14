@@ -268,6 +268,23 @@ class AgentPolicyTests(unittest.TestCase):
         self.assertTrue(accepted.track_window_titles)
         self.assertFalse(accepted.allow_pause)
 
+    def test_offline_question_waits_until_the_notice_is_acknowledged(self):
+        a = self.agent
+        a._effective_settings(self.policy(True, ask_offline_reason=True, offline_prompt_minutes=10))
+        pending = a._effective_settings(self.policy(False, ask_offline_reason=True, offline_prompt_minutes=5))
+        self.assertTrue(pending.ask_offline_reason)
+        self.assertEqual(pending.offline_prompt_minutes, 10, "a shorter wait asks more often, so it waits")
+        self.assertEqual(
+            a._effective_settings(self.policy(False, ask_offline_reason=True, offline_prompt_minutes=30)).offline_prompt_minutes,
+            30, "asking less often applies immediately")
+        self.assertFalse(a._effective_settings(self.policy(False, ask_offline_reason=False)).ask_offline_reason)
+
+    def test_turning_the_question_on_waits_for_acknowledgement(self):
+        a = self.agent
+        a._effective_settings(self.policy(True))
+        self.assertFalse(a._effective_settings(self.policy(False, ask_offline_reason=True)).ask_offline_reason)
+        self.assertTrue(a._effective_settings(self.policy(True, ask_offline_reason=True)).ask_offline_reason)
+
     def test_narrowing_applies_immediately(self):
         a = self.agent
         a._effective_settings(self.policy(True))

@@ -68,8 +68,9 @@ export default function Goals() {
     <Screen>
       <Card title="Productivity goals">
         <Text style={styles.hint}>
-          A goal is the productive time you expect per person per working day, counted from apps and websites marked
-          productive. People below the under-utilised share of the goal may have spare capacity; people above the
+          A goal is the productive time you expect per person per working day. That is computer time in apps and websites
+          marked productive, plus time away from the computer in the reasons counted as productive under Monitoring &
+          privacy. People below the under-utilised share of the goal may have spare capacity; people above the
           over-utilised share may be overloaded. A team's goal replaces the company goal for that team. Goals are only
           visible to owners and managers.
         </Text>

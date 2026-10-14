@@ -2,6 +2,8 @@
 // Deploy with --no-verify-jwt. Send the key as "Authorization: Bearer myc_..." or "X-Api-Key: myc_...".
 //   GET /api/v1/employees
 //   GET /api/v1/daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD   (at most 93 days)
+//     productive_seconds includes time away from the computer in reasons counted as productive.
+//     offline_seconds is every answer; productive_offline_seconds is the productive part.
 //   GET /api/v1/usage?from=YYYY-MM-DD&to=YYYY-MM-DD          (apps and websites per person per day)
 //   GET /api/v1/alerts?since=ISO-8601 time                   (within the last 93 days)
 // File names, window titles and full web addresses are never returned.

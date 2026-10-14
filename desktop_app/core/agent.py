@@ -22,6 +22,7 @@ from core.credentials import CredentialStore
 from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
 from core.files import FileActivityMonitor, FileSettings
+from core.offline import REASONS, OfflinePrompt, ReturnTracker, clean_note
 from core.store import LocalStore
 from core.sync import SyncService
 from utils.logger import get_logger
@@ -43,7 +44,7 @@ class Profile:
 
 class Agent:
     def __init__(self, on_change: Callable[[str], None]):
-        """on_change(kind) with kind in: state, policy, auth_lost, connectivity, projects."""
+        """on_change(kind) with kind in: state, policy, auth_lost, connectivity, projects, offline."""
         self.on_change = on_change
         self.creds = CredentialStore(CREDENTIALS_FILE)
         self.store = LocalStore(LOCAL_DB_FILE)
@@ -59,6 +60,9 @@ class Agent:
         self.engine: Optional[SegmentEngine] = None
         self.sync: Optional[SyncService] = None
         self.files: Optional[FileActivityMonitor] = None
+        self.returns = ReturnTracker()
+        self._offline_lock = threading.Lock()
+        self._offline_queue: list[OfflinePrompt] = []
         self._engine_lock = threading.Lock()
         self._tracker: Optional[threading.Thread] = None
         self._stop_tracking = threading.Event()
@@ -354,6 +358,9 @@ class Agent:
             on_service=self._apply_service,
             on_device_registered=self._register_report_key,
         )
+        self.returns.reset()
+        with self._offline_lock:
+            self._offline_queue.clear()
         self.engine = SegmentEngine(self.store, self.identity, self.settings, self._engine_event)
         self.engine.start(now)
         self.files = FileActivityMonitor(self._file_event, self.store.get, self.store.set, self.clock.now)
@@ -373,6 +380,8 @@ class Agent:
         self.on_change("state")
 
     def _engine_event(self, kind: str, at: datetime, details: dict[str, Any]) -> None:
+        if kind == "sleep":
+            self.returns.note_absence(at)
         if self.sync:
             self.sync.record_event(kind, details, at=at)
         if kind == "wake" and self.sync:
@@ -464,6 +473,14 @@ class Agent:
                     elif sample.locked:
                         rhythm.reset()
 
+                earliest = self.engine.session_started_at if self.engine else None
+                minutes = s.offline_prompt_minutes if isinstance(s.offline_prompt_minutes, int) else 10
+                prompt = self.returns.observe(
+                    now, state, sample.idle_seconds, max(1, min(minutes, 120)) * 60,
+                    bool(s.ask_offline_reason) and block is None, earliest)
+                if prompt:
+                    self._offer_offline(prompt)
+
                 if self.files:
                     self.files.configure(
                         FileSettings(s.detect_removable_media, s.detect_cloud_sync, s.detect_network_drives),
@@ -523,6 +540,9 @@ class Agent:
             if sess["id"] == self.identity.session_id:
                 sess.update(ended_at=now, end_reason=end_reason)
                 self.store.save_session(sess)
+        self.returns.reset()
+        with self._offline_lock:
+            self._offline_queue.clear()
         self.tracking = False
         if self.sync:
             if reason != "auth_lost":
@@ -557,6 +577,34 @@ class Agent:
         self.on_change("auth_lost")
 
     # ---- user controls ---------------------------------------------------
+    def _offer_offline(self, prompt: OfflinePrompt) -> None:
+        with self._offline_lock:
+            if len(self._offline_queue) >= 5:
+                return
+            self._offline_queue.append(prompt)
+        self.on_change("offline")
+
+    def has_offline_prompt(self) -> bool:
+        with self._offline_lock:
+            return bool(self._offline_queue)
+
+    def take_offline_prompt(self) -> Optional[OfflinePrompt]:
+        with self._offline_lock:
+            return self._offline_queue.pop(0) if self._offline_queue else None
+
+    def requeue_offline(self, prompt: OfflinePrompt) -> None:
+        with self._offline_lock:
+            self._offline_queue.insert(0, prompt)
+
+    def answer_offline(self, prompt: OfflinePrompt, reason: str, note: str) -> None:
+        """Record the employee's answer. A dismissal never calls this."""
+        if reason not in REASONS or self.sync is None:
+            return
+        self.sync.record_offline_entry({
+            "started_at": prompt.started_at, "ended_at": prompt.ended_at,
+            "reason": reason, "note": clean_note(note),
+        })
+
     def set_paused(self, paused: bool) -> None:
         if paused and not self.settings.allow_pause:
             raise RuntimeError("Your organisation does not allow pausing tracking.")

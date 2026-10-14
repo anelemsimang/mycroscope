@@ -46,6 +46,8 @@ class TrackingSettings:
     detect_removable_media: bool = False
     detect_cloud_sync: bool = False
     detect_network_drives: bool = False
+    ask_offline_reason: bool = False
+    offline_prompt_minutes: int = 10
     schedule: Schedule = field(default_factory=Schedule)
 
     @classmethod
@@ -73,6 +75,9 @@ class TrackingSettings:
             detect_removable_media=self.detect_removable_media and a.detect_removable_media,
             detect_cloud_sync=self.detect_cloud_sync and a.detect_cloud_sync,
             detect_network_drives=self.detect_network_drives and a.detect_network_drives,
+            ask_offline_reason=self.ask_offline_reason and a.ask_offline_reason,
+            # A shorter wait asks more often, so it waits for the new notice. A longer wait applies at once.
+            offline_prompt_minutes=max(self.offline_prompt_minutes, a.offline_prompt_minutes),
             schedule=self.schedule.narrowed_to(acknowledged.schedule if acknowledged else None),
         )
 

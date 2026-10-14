@@ -21,6 +21,7 @@ from config import (APP_NAME, IN_USE_IDLE_SECONDS, REMINDER_INTERVAL_SECONDS, TH
                     UNATTENDED_ALERT_MINUTES, UNATTENDED_REPORT_SECONDS, VERSION)
 from core.agent import Agent
 from core.api import ApiError, AuthError, NetworkError
+from core.offline import OfflinePrompt, format_away
 from core.unattended import UnattendedWatch
 from ui import theme
 from ui.theme import P
@@ -113,6 +114,7 @@ class AgentApp:
                                       UNATTENDED_REPORT_SECONDS, IN_USE_IDLE_SECONDS)
         self._watch.reset(time.monotonic())
         self._on_top = False
+        self._asking_offline = False
 
     def _set_window_icon(self) -> None:
         # The .ico holds 16-256 px. Don't add iconphoto: on Windows it makes the taskbar fall back to python.exe's icon.
@@ -285,6 +287,52 @@ class AgentApp:
         entry.bind("<Return>", lambda _: done(entry.get()))
         dlg.bind("<Escape>", lambda _: done(None))
         return self._run_modal(dlg, result, entry)
+
+    def _ask_offline(self, prompt: OfflinePrompt) -> Optional[tuple[str, str]]:
+        """Meeting, call, break or other, with an optional note. None means the employee dismissed it."""
+        px = self.theme.px
+        dlg, body, result = self._modal()
+        dlg.attributes("-topmost", True)
+        ttk.Label(body, text=f"You were away {format_away(prompt.minutes)}", style="H2.TLabel").pack(anchor="w")
+        ttk.Label(body, text="What were you doing? You can dismiss this.", wraplength=px(340),
+                  justify="left", foreground=P["text_soft"]).pack(anchor="w", pady=(px(4), 0))
+        note = self._field(body, "Note (optional)")
+        note.configure(width=36)
+
+        def done(reason: Optional[str]) -> None:
+            result["value"] = None if reason is None else (reason, note.get())
+            dlg.destroy()
+
+        buttons = ttk.Frame(body)
+        buttons.pack(fill="x", pady=(px(16), 0))
+        for label, reason in (("Meeting", "meeting"), ("Call", "call"), ("Break", "break"), ("Other", "other")):
+            ttk.Button(buttons, text=label, style="Primary.TButton" if reason in ("meeting", "call") else "TButton",
+                       command=lambda r=reason: done(r)).pack(side="left", padx=(0, px(6)))
+        ttk.Button(body, text="Dismiss", command=lambda: done(None)).pack(anchor="e", pady=(px(10), 0))
+        dlg.bind("<Escape>", lambda _: done(None))
+        dlg.protocol("WM_DELETE_WINDOW", lambda: done(None))
+        return self._run_modal(dlg, result, note)
+
+    def _maybe_ask_offline(self) -> None:
+        if self._closed or self._asking_offline:
+            return
+        prompt = self.agent.take_offline_prompt()
+        if prompt is None:
+            return
+        if self.root.grab_current() is not None:
+            self.agent.requeue_offline(prompt)
+            self.root.after(1000, self._maybe_ask_offline)
+            return
+        self._asking_offline = True
+        try:
+            self.show_window()
+            answer = self._ask_offline(prompt)
+            if answer:
+                self.agent.answer_offline(prompt, answer[0], answer[1])
+        finally:
+            self._asking_offline = False
+        if self.agent.has_offline_prompt():
+            self.root.after(200, self._maybe_ask_offline)
 
     def show_window(self) -> None:
         self.root.deiconify()
@@ -739,6 +787,8 @@ class AgentApp:
             self._notify("The monitoring notice has changed. Please review it.")
         elif kind == "projects":
             self._fill_projects()
+        elif kind == "offline":
+            self._maybe_ask_offline()
         elif kind == "state":
             self._update_tray(self.agent.live_status().get("state", "logged_out"))
 

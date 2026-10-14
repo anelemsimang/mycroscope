@@ -118,7 +118,14 @@ function sumTrend(points: TrendPoint[]) {
     active: t.active + p.active_seconds,
     productive: t.productive + p.productive_seconds,
     unproductive: t.unproductive + p.unproductive_seconds,
-  }), { personDays: 0, active: 0, productive: 0, unproductive: 0 });
+    offline: t.offline + p.offline_seconds,
+    productiveOffline: t.productiveOffline + p.productive_offline_seconds,
+  }), { personDays: 0, active: 0, productive: 0, unproductive: 0, offline: 0, productiveOffline: 0 });
+}
+
+/** Computer productive time plus the reasons the company counts as productive. */
+function productiveTotal(t: { productive: number; productiveOffline: number }): number {
+  return t.productive + t.productiveOffline;
 }
 
 function change(now: number, before: number): string {
@@ -151,8 +158,8 @@ function Trends({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
 
   const { now, before } = data;
   const perDay = (s: number, days: number) => (days ? s / days : 0);
-  const prodNow = perDay(now.productive, now.personDays);
-  const prodBefore = perDay(before.productive, before.personDays);
+  const prodNow = perDay(productiveTotal(now), now.personDays);
+  const prodBefore = perDay(productiveTotal(before), before.personDays);
   const activeNow = perDay(now.active, now.personDays);
   const activeBefore = perDay(before.active, before.personDays);
   const shown = data.points.filter((p) => p.person_days > 0);
@@ -162,7 +169,7 @@ function Trends({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
       <StatGrid items={[
         { label: 'Productive per person-day', value: formatDuration(prodNow), color: colors.success },
         { label: 'Active per person-day', value: formatDuration(activeNow) },
-        { label: 'Productive share', value: percent(now.productive, now.active) },
+        { label: 'Productive share', value: percent(productiveTotal(now), now.active + now.productiveOffline) },
         { label: 'Days worked', value: String(now.personDays) },
       ]} />
       <Card title="Compared with the previous period">
@@ -173,12 +180,16 @@ function Trends({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
             <Text style={styles.rowText}>Productive time per person-day: {formatDuration(prodNow)}{change(prodNow, prodBefore)}</Text>
             <Text style={styles.rowText}>Active time per person-day: {formatDuration(activeNow)}{change(activeNow, activeBefore)}</Text>
             <Text style={styles.rowText}>
-              Productive share: {percent(now.productive, now.active)} (previously {percent(before.productive, before.active)})
+              Productive share: {percent(productiveTotal(now), now.active + now.productiveOffline)} (previously {percent(productiveTotal(before), before.active + before.productiveOffline)})
             </Text>
           </>
         )}
         <Text style={styles.hint}>
           A person-day is one person working on one day, so the figures stay comparable when people join, leave or take leave.
+          A day counts when there was computer activity or productive time away. Productive time adds computer time in
+          productive apps and websites to time away from the computer in the reasons counted as productive
+          (Monitoring & privacy). The coloured bars below are computer time
+          {now.offline > 0 ? `, and ${formatDuration(now.offline)} away from the computer was explained in this period` : ''}.
         </Text>
       </Card>
       <Card title={granularity === 'day' ? 'By day' : granularity === 'week' ? 'By week' : 'By month'}>
@@ -190,7 +201,7 @@ function Trends({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
               <View style={[styles.row, { justifyContent: 'space-between' }]}>
                 <Text style={styles.rowText}>{periodLabel(p.period_start, granularity)}</Text>
                 <Text style={styles.hint}>
-                  {formatDuration(perDay(p.productive_seconds, p.person_days))} productive per person-day · {p.people}{' '}
+                  {formatDuration(perDay(p.productive_seconds + p.productive_offline_seconds, p.person_days))} productive per person-day · {p.people}{' '}
                   {p.people === 1 ? 'person' : 'people'}
                 </Text>
               </View>
@@ -240,8 +251,9 @@ function Workload({ from, to, team }: { from: Ymd; to: Ymd; team: string | null 
       ]} />
       <Card title="Workload balance">
         <Text style={styles.hint}>
-          Productive time per day worked, as a share of each person's daily goal. Only tracked computer time is counted, so
-          meetings, calls and work away from the computer are not included.
+          Productive time per day worked, as a share of each person's daily goal. This is computer time in productive apps
+          and websites, plus time away from the computer in the reasons counted as productive. Breaks and unexplained time
+          are left out. A day counts when there was computer activity or productive time away.
         </Text>
         {count('no_goal') > 0 ? (
           <Pressable onPress={() => router.push('/goals')}>
@@ -277,7 +289,9 @@ function WorkloadBar({ row, max }: { row: WorkloadRow; max: number }) {
       right={`${Math.round(row.utilisation ?? 0)}%`}
       color={STATUS_COLOR[row.status]}
       sub={`${STATUS_LABEL[row.status]} · ${formatDuration(perDay)} productive per day of a ${row.goal_hours} h goal · ${
-        row.days_worked} ${row.days_worked === 1 ? 'day' : 'days'}${row.team_name ? ` · ${row.team_name}` : ''}`}
+        row.days_worked} ${row.days_worked === 1 ? 'day' : 'days'}${
+        row.offline_seconds ? ` · ${formatDuration(row.offline_seconds)} away explained` : ''}${
+        row.team_name ? ` · ${row.team_name}` : ''}`}
     />
   );
 }
@@ -311,10 +325,10 @@ function Capacity({ from, to, orgWide, teams }: {
       ]} />
       <Card title="Capacity by team">
         <Text style={styles.hint}>
-          An estimate from tracked productive time against each team's daily goal. One FTE is one full-time person working
-          to the goal. Spare capacity means people averaged less productive time than the goal; over capacity means more.
-          Time away from the computer (meetings, calls, site work) is not tracked, so treat these as a starting point for a
-          conversation, not a verdict.
+          An estimate from productive time against each team's daily goal. One FTE is one full-time person working to the
+          goal. Spare capacity means people averaged less productive time than the goal; over capacity means more.
+          Productive time includes the reasons counted as productive for time away from the computer. Unexplained time
+          away is left out, so treat the result as a starting point for a conversation.
         </Text>
         {data.rows.length === 0 ? <Empty text="No activity in this period." /> : null}
         {data.rows.map((r) => <CapacityLine key={r.team_id ?? 'none'} row={r} />)}

@@ -9,7 +9,8 @@ import { api, errorMessage, type DailyTotal, type EmployeeRow } from '@/lib/api'
 import { notify } from '@/lib/dialog';
 import { sharePdf, shareCsv } from '@/lib/export';
 import {
-  PERIOD_LABELS, formatDay, formatDuration, formatTime, htmlEscape, percent, periodRange, toCsv, todayIn, type PeriodKey,
+  PERIOD_LABELS, formatDay, formatDuration, formatTime, htmlEscape, offlineSeconds, percent, periodRange, toCsv, todayIn,
+  type PeriodKey,
 } from '@/lib/format';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -21,6 +22,8 @@ interface Line {
   idle: number;
   away: number;
   paused: number;
+  offline: number;
+  productiveOffline: number;
   daysWorked: number;
 }
 
@@ -53,6 +56,8 @@ export default function Reports() {
       return {
         employee, days,
         active: sum('active_seconds'), idle: sum('idle_seconds'), away: sum('away_seconds'), paused: sum('paused_seconds'),
+        offline: days.reduce((a, d) => a + offlineSeconds(d), 0),
+        productiveOffline: sum('productive_offline_seconds'),
         daysWorked: days.filter((d) => d.active_seconds > 0).length,
       };
     }));
@@ -60,8 +65,11 @@ export default function Reports() {
   }, [range.from, range.to, selectedKey, projectId]);
 
   const totals = useMemo(() => (data ?? []).reduce(
-    (t, l) => ({ active: t.active + l.active, idle: t.idle + l.idle, paused: t.paused + l.paused }),
-    { active: 0, idle: 0, paused: 0 }), [data]);
+    (t, l) => ({
+      active: t.active + l.active, idle: t.idle + l.idle, paused: t.paused + l.paused,
+      offline: t.offline + l.offline, productiveOffline: t.productiveOffline + l.productiveOffline,
+    }),
+    { active: 0, idle: 0, paused: 0, offline: 0, productiveOffline: 0 }), [data]);
   const single = who !== ALL ? data?.[0] : undefined;
   const scopeName = single ? single.employee.name : teamName ?? 'Team';
   const title = `${scopeName} activity · ${PERIOD_LABELS[period]}${projectName ? ` · ${projectName}` : ''}`;
@@ -83,11 +91,13 @@ export default function Reports() {
     try {
       const rows = data.flatMap((l) => l.days.map((d) => [
         d.day, l.employee.name, l.employee.employee_code, projectName ?? 'All projects', d.active_seconds, d.idle_seconds, d.paused_seconds,
-        d.away_seconds, (d.active_seconds / 3600).toFixed(2),
+        d.away_seconds, d.meeting_seconds, d.call_seconds, d.break_seconds, d.other_seconds, d.productive_offline_seconds,
+        (d.active_seconds / 3600).toFixed(2),
       ]));
       await logExport('csv');
       await shareCsv(`mycroscope_${scopeName}${projectName ? `_${projectName}` : ''}_${range.from}_${range.to}`, toCsv(
-        ['date', 'employee', 'employee_code', 'project', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds', 'active_hours'],
+        ['date', 'employee', 'employee_code', 'project', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds',
+          'meeting_seconds', 'call_seconds', 'break_seconds', 'other_seconds', 'productive_offline_seconds', 'active_hours'],
         rows));
     } catch (e) {
       notify('Export failed', errorMessage(e));
@@ -126,10 +136,11 @@ export default function Reports() {
     setExporting('pdf');
     try {
       const table = single
-        ? `<table><tr><th>Day</th><th class="num">Active</th><th class="num">Idle</th><th class="num">Paused</th><th class="num">Away</th></tr>
+        ? `<table><tr><th>Day</th><th class="num">Active</th><th class="num">Idle</th><th class="num">Paused</th><th class="num">Away</th><th class="num">Time away</th></tr>
           ${single.days.map((d) => `<tr><td>${htmlEscape(formatDay(d.day, { weekday: true }))}</td>
             <td class="num">${formatDuration(d.active_seconds)}</td><td class="num">${formatDuration(d.idle_seconds)}</td>
-            <td class="num">${formatDuration(d.paused_seconds)}</td><td class="num">${formatDuration(d.away_seconds)}</td></tr>`).join('')}
+            <td class="num">${formatDuration(d.paused_seconds)}</td><td class="num">${formatDuration(d.away_seconds)}</td>
+            <td class="num">${formatDuration(offlineSeconds(d))}</td></tr>`).join('')}
           </table>`
         : `<table><tr><th>Employee</th><th class="num">Active</th><th class="num">Idle</th><th class="num">Paused</th>
           <th class="num">Days active</th><th class="num">Active share</th></tr>
@@ -138,7 +149,8 @@ export default function Reports() {
             <td class="num">${l.daysWorked}</td><td class="num">${percent(l.active, l.active + l.idle)}</td></tr>`).join('')}
           </table>`;
       const body = `<p class="muted">${htmlEscape(profile.organizationName)} · ${htmlEscape(subtitle)} · times in ${htmlEscape(profile.timezone)}</p>
-        <p>Total: ${formatDuration(totals.active)} active · ${formatDuration(totals.idle)} idle · ${formatDuration(totals.paused)} paused</p>
+        <p>Total: ${formatDuration(totals.active)} active · ${formatDuration(totals.idle)} idle · ${formatDuration(totals.paused)} paused · ${formatDuration(totals.offline)} time away (${formatDuration(totals.productiveOffline)} counted as productive)</p>
+        <p class="muted">Time away is what people said an idle or away stretch was. It is left out when a project is selected. Productive reasons are added in Insights and towards goals.</p>
         ${table}<p class="muted">Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC by ${htmlEscape(profile.name)}.
         Active = keyboard/mouse input within the idle threshold. Contains personal information: handle under POPIA.</p>`;
       await logExport('pdf');
@@ -192,7 +204,14 @@ export default function Reports() {
             { label: 'Active', value: formatDuration(totals.active), color: stateColor.active },
             { label: 'Idle', value: formatDuration(totals.idle), color: stateColor.idle },
             { label: 'Paused', value: formatDuration(totals.paused), color: stateColor.paused },
+            { label: 'Time away', value: formatDuration(totals.offline) },
           ]} />
+          <Text style={styles.hint}>
+            Time away is what people said an idle or away stretch was, so it also sits inside idle or away.
+            {projectId
+              ? ' A project report leaves it out, because it is not tied to a project.'
+              : ` ${formatDuration(totals.productiveOffline)} of it counts as productive in Insights and towards goals.`}
+          </Text>
           {single ? (
             <Card title={`${single.employee.name} · by day`}>
               {single.days.map((d) => (

@@ -84,6 +84,28 @@ export function formatDuration(seconds: number | null | undefined): string {
   return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`;
 }
 
+const OFFLINE_PARTS = [
+  ['meeting_seconds', 'in meetings'],
+  ['call_seconds', 'on calls'],
+  ['break_seconds', 'on breaks'],
+  ['other_seconds', 'other'],
+] as const;
+
+export type OfflineSeconds = Partial<Record<(typeof OFFLINE_PARTS)[number][0], number>>;
+
+/** Total of the four answers, which still also sit inside idle or away time. */
+export function offlineSeconds(row: OfflineSeconds): number {
+  return OFFLINE_PARTS.reduce((sum, [key]) => sum + (Number(row[key]) || 0), 0);
+}
+
+/** "45m in meetings, 15m on breaks", or "" when there is nothing to explain. */
+export function offlineSummary(row: OfflineSeconds): string {
+  return OFFLINE_PARTS
+    .filter(([key]) => (Number(row[key]) || 0) > 0)
+    .map(([key, label]) => `${formatDuration(row[key])} ${label}`)
+    .join(', ');
+}
+
 export function formatTime(iso: string | null | undefined, timeZone: string): string {
   if (!iso) return '–';
   return new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hour12: false }).format(

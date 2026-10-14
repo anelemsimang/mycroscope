@@ -9,7 +9,7 @@ import {
 import { api, errorMessage } from '@/lib/api';
 import { notify } from '@/lib/dialog';
 import { shareCsv } from '@/lib/export';
-import { addDays, formatDay, formatDuration, formatTime, toCsv, todayIn } from '@/lib/format';
+import { addDays, formatDay, formatDuration, formatTime, offlineSeconds, offlineSummary, toCsv, todayIn } from '@/lib/format';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
@@ -82,6 +82,14 @@ export default function DayDetail() {
               ? `First activity ${formatTime(t.first_activity_at, tz)} · last ${formatTime(t.last_activity_at, tz)}`
               : 'No activity recorded'}
           </Text>
+          {offlineSeconds(t ?? {}) > 0 ? (
+            <Text style={[styles.hint, { textAlign: 'center' }]}>
+              Time away: {offlineSummary(t ?? {})}
+              {(t?.productive_offline_seconds ?? 0) > 0
+                ? ` · ${formatDuration(t?.productive_offline_seconds)} counted as productive`
+                : ''}
+            </Text>
+          ) : null}
 
           <Card title={`Application Summary (${data.apps.length})`}>
             {data.apps.length === 0 ? <Empty text="No applications recorded." /> : null}

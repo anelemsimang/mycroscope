@@ -79,6 +79,19 @@ create table if not exists file_events (
 );
 create index if not exists file_events_pending on file_events (employee_id, occurred_at) where uploaded = 0;
 
+create table if not exists offline_entries (
+  id text primary key,
+  organization_id text not null,
+  employee_id text not null,
+  device_id text not null,
+  started_at text not null,
+  ended_at text not null,
+  reason text not null,
+  note text,
+  uploaded integer not null default 0
+);
+create index if not exists offline_entries_pending on offline_entries (employee_id, started_at) where uploaded = 0;
+
 create table if not exists kv (
   key text primary key,
   value text
@@ -195,6 +208,7 @@ class LocalStore:
             )
             self._db.execute("delete from events where uploaded = 1 and occurred_at < ?", (iso(before),))
             self._db.execute("delete from file_events where uploaded = 1", ())
+            self._db.execute("delete from offline_entries where uploaded = 1", ())
             self._db.execute(
                 "delete from sessions where ended_at is not null and ended_at < ? and version <= uploaded_version",
                 (iso(before),),
@@ -325,3 +339,36 @@ class LocalStore:
         """The server only accepts the last 14 days; older unsent rows can never be delivered."""
         with self._lock:
             return self._db.execute("delete from file_events where occurred_at < ?", (iso(before),)).rowcount
+
+    # ---- time away from the computer (the employee's own answer) --------
+    OFFLINE_FIELDS = ("id", "organization_id", "employee_id", "device_id", "started_at", "ended_at", "reason", "note")
+
+    def add_offline_entry(self, entry: dict[str, Any]) -> None:
+        row = {f: entry.get(f) for f in self.OFFLINE_FIELDS}
+        row["started_at"] = iso(row["started_at"])
+        row["ended_at"] = iso(row["ended_at"])
+        cols = ", ".join(self.OFFLINE_FIELDS)
+        params = ", ".join(f":{f}" for f in self.OFFLINE_FIELDS)
+        with self._lock:
+            self._db.execute(f"insert or ignore into offline_entries ({cols}) values ({params})", row)
+
+    def pending_offline_entries(self, employee_id: str, limit: int) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._db.execute(
+                "select * from offline_entries where employee_id = ? and uploaded = 0 order by started_at limit ?",
+                (employee_id, limit),
+            ).fetchall()
+        return [{**{f: r[f] for f in self.OFFLINE_FIELDS},
+                 "started_at": parse_iso(r["started_at"]), "ended_at": parse_iso(r["ended_at"])} for r in rows]
+
+    def mark_offline_uploaded(self, ids: Iterable[str]) -> None:
+        with self._lock:
+            self._db.executemany("update offline_entries set uploaded = 1 where id = ?", [(i,) for i in ids])
+
+    def drop_offline_entries(self, ids: Iterable[str]) -> None:
+        with self._lock:
+            self._db.executemany("delete from offline_entries where id = ?", [(i,) for i in ids])
+
+    def drop_stale_offline_entries(self, before: datetime) -> int:
+        with self._lock:
+            return self._db.execute("delete from offline_entries where started_at < ?", (iso(before),)).rowcount

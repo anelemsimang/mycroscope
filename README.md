@@ -177,8 +177,8 @@ and used during working hours, e.g. the agent was removed, the PC restarted and 
   monthly cost per seat to show unused licences.
 
 It rebuilds `daily_usage` as one row per person, day, app and website (so website rules can override browser
-rules) and back-fills it from stored activity. Reports cover at most 400 days per request. Only tracked computer time
-is counted, so meetings and work away from the computer are not included in any of these figures.
+rules) and back-fills it from stored activity. Reports cover at most 400 days per request. These figures start as
+tracked computer time. From the migration below, productive totals can also include time away from the computer.
 
 `20261016090000_alerts_and_integrations.sql` (apply after the one above) adds:
 - **Alert rules** (Standard and up; manager app -> Alerts -> Alert rules): an alert when someone uses a website
@@ -209,6 +209,28 @@ supabase functions deploy notify-managers --no-verify-jwt
 supabase functions deploy channel-test
 supabase functions deploy api --no-verify-jwt
 ```
+
+`20261017090000_offline_time.sql` (apply after the one above) adds **time away from the computer**, on every plan.
+With agent 2.4, when someone comes back after being idle or away for longer than a company setting (10 minutes
+unless you change it), the desktop app asks: meeting, call, break or other, with an optional note. They can dismiss
+it. Nothing is asked until they have acknowledged the notice that describes it, and nothing is asked outside working
+hours, while paused, or while the subscription is inactive. Reinstall `Mycroscope-Setup.exe` for this.
+
+Monitoring & privacy -> Time away from the computer turns it on and chooses which reasons count as productive.
+Meetings and calls do, unless you change that. The choice applies to past days as well, the same way categories do.
+
+Where that time appears:
+- **Daily totals, the employee page and Reports** show it on its own (meeting, call, break, other). It still also
+  sits inside idle or away, because the activity record is unchanged. A project report leaves it out.
+- **Trends** adds the productive reasons to the productive-per-person-day figure. A day counts when there was computer activity or productive time away. The coloured bars stay computer time.
+- **Workload, capacity and goals** add the productive reasons to the productive time compared with the goal. A day
+  with only a meeting still counts. Breaks and unexplained time do not.
+- **App, website and software reports** are unchanged.
+- The **read-only API** `daily-totals` productive figure includes the productive reasons, and also returns
+  `offline_seconds` and `productive_offline_seconds`.
+
+Answers are kept for the same period as detailed activity and are removed when a manager deletes someone's activity.
+Two answers for the same person cannot overlap. The desktop app drops an answer the server refuses.
 
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.

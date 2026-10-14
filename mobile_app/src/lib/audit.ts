@@ -27,12 +27,19 @@ const SETTING_LABELS: Record<string, string> = {
   timezone: 'Timezone',
   information_officer_name: 'Information Officer',
   information_officer_email: 'Information Officer email',
+  ask_offline_reason: 'Ask about time away',
+  offline_prompt_minutes: 'Ask after',
+  productive_offline_reasons: 'Productive time away',
 };
 
 function settingValue(key: string, value: unknown): string {
   if (value === null || value === undefined || value === '') return 'none';
   if (typeof value === 'boolean') return value ? 'on' : 'off';
   if (key === 'idle_threshold_seconds') return `${Number(value) / 60} min`;
+  if (key === 'offline_prompt_minutes') return `${value} min`;
+  if (key === 'productive_offline_reasons') {
+    return Array.isArray(value) && value.length ? value.join(', ') : 'none';
+  }
   if (key.endsWith('retention_days')) return `${value} days`;
   if (key === 'notice_custom_text') return 'edited';
   return String(value);
@@ -80,7 +87,10 @@ export function describeAudit(
     case 'exported_data':
       return { actor, title: `Exported ${target}'s activity data`, detail: [range, str(d.format).toUpperCase()].filter(Boolean).join(' · ') };
     case 'activity_deleted':
-      return { actor, title: `Deleted ${target}'s activity`, detail: `${str(d.segments)} record(s), ${range}. Reason: ${str(d.reason)}` };
+      return {
+        actor, title: `Deleted ${target}'s activity`,
+        detail: `${str(d.segments)} record(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}, ${range}. Reason: ${str(d.reason)}`,
+      };
     case 'employee_deleted':
       return { actor, title: `Deleted employee ${str(d.name) || target}`, detail: `Reason: ${str(d.reason)}` };
     case 'employee_created':
@@ -109,7 +119,7 @@ export function describeAudit(
     case 'retention_purge':
       return {
         actor, title: 'Nightly clean-up deleted expired data',
-        detail: `${str(d.segments)} activity record(s), ${str(d.events)} event(s), ${str(d.sessions)} session(s), ${str(d.summaries)} daily total(s) older than the retention period`,
+        detail: `${str(d.segments)} activity record(s), ${str(d.events)} event(s), ${str(d.sessions)} session(s), ${str(d.summaries)} daily total(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''} older than the retention period`,
       };
     case 'payment_received':
       return { actor, title: 'Payment received', detail: `${str(d.seats)} seats × ${str(d.months)} month(s) · reference ${str(d.reference)}` };

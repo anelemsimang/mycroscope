@@ -5,7 +5,7 @@ import { Pressable, Text, View } from 'react-native';
 import {
   Button, Card, ErrorBanner, Field, Loading, Screen, Segmented, ToggleRow, colors, styles,
 } from '@/components/ui';
-import { api, errorMessage, type ComplianceSettings } from '@/lib/api';
+import { api, errorMessage, type ComplianceSettings, type OfflineReason } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDateTime } from '@/lib/format';
 import { useProfile, useSession } from '@/lib/session';
@@ -18,6 +18,12 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 const hhmm = (t: string) => (t ?? '').slice(0, 5);
 const IDLE_MINUTES = [1, 2, 3, 5, 10, 15, 30, 60];
 const LIMITS = { retention_days: [7, 1825], summary_retention_days: [30, 3650], file_retention_days: [7, 365] } as const;
+const OFFLINE_REASONS: { id: OfflineReason; label: string; hint: string }[] = [
+  { id: 'meeting', label: 'Meetings', hint: 'Added to productive time in Insights, workload, capacity and goals.' },
+  { id: 'call', label: 'Calls', hint: 'Added to productive time, the same way as meetings.' },
+  { id: 'break', label: 'Breaks', hint: 'Shown on its own. Left out of productive time unless you turn this on.' },
+  { id: 'other', label: 'Other', hint: 'Anything else the employee types a note for. Left out of productive time unless you turn this on.' },
+];
 
 export default function Monitoring() {
   const profile = useProfile();
@@ -48,6 +54,7 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
   const [retention, setRetention] = useState(String(initial.retention_days));
   const [summaryRetention, setSummaryRetention] = useState(String(initial.summary_retention_days));
   const [fileRetention, setFileRetention] = useState(String(initial.file_retention_days));
+  const [offlineMinutes, setOfflineMinutes] = useState(String(initial.offline_prompt_minutes));
   const [showNotice, setShowNotice] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,6 +80,10 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
     if (typeof summary === 'string') return setError(summary);
     const files = parseDays(fileRetention, 'file_retention_days', 'File activity retention');
     if (typeof files === 'string') return setError(files);
+    const askedAfter = Number(offlineMinutes.trim());
+    if (!Number.isInteger(askedAfter) || askedAfter < 1 || askedAfter > 120) {
+      return setError('Ask after a whole number of minutes from 1 to 120.');
+    }
     if ((draft.notice_custom_text ?? '').length > 4000) return setError('The message to employees is limited to 4000 characters.');
     if (draft.tracking_schedule === 'work_hours') {
       if (draft.work_days.length === 0) return setError('Choose at least one working day.');
@@ -82,7 +93,11 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
     if (draft.require_mfa && !initial.require_mfa && aal.next !== 'aal2') {
       return setError('Set up two-factor login for your own account first (Settings), or you would lock yourself out of employee data.');
     }
-    const next: Draft = { ...draft, retention_days: detail, summary_retention_days: summary, file_retention_days: files };
+    const next: Draft = {
+      ...draft, retention_days: detail, summary_retention_days: summary, file_retention_days: files,
+      offline_prompt_minutes: askedAfter,
+      productive_offline_reasons: OFFLINE_REASONS.map((r) => r.id).filter((id) => draft.productive_offline_reasons.includes(id)),
+    };
 
     const initialDraft: Draft = { ...initial, work_start: hhmm(initial.work_start), work_end: hhmm(initial.work_end) };
     const changed = (Object.keys(next) as (keyof Draft)[])
@@ -158,6 +173,27 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
           onChange={(v) => set('idle_threshold_seconds', Math.round(Number(v) * 60))} />
         <ToggleRow label="Employees may pause monitoring" value={draft.allow_pause} onChange={(v) => set('allow_pause', v)}
           hint="Pauses are recorded and visible to managers." />
+      </Card>
+
+      <Card title="Time away from the computer">
+        <Text style={styles.hint}>
+          When someone comes back after being idle or away, the desktop app can ask whether it was a meeting, a call, a
+          break or something else. They can dismiss the question. Idle and away time is still recorded either way, and
+          the answer is listed on their page for them and for managers.
+        </Text>
+        <ToggleRow label="Ask what they were doing" value={draft.ask_offline_reason}
+          onChange={(v) => set('ask_offline_reason', v)}
+          hint="This is in the monitoring notice. The desktop app asks only after the employee has acknowledged that notice. Included on every plan." />
+        <Field label="Ask after (minutes)" value={offlineMinutes} onChangeText={setOfflineMinutes}
+          keyboardType="number-pad" hint="1 to 120. The suggested wait is 10 minutes." />
+        <Text style={styles.label}>Count as productive time</Text>
+        {OFFLINE_REASONS.map((r) => (
+          <ToggleRow key={r.id} label={r.label} value={draft.productive_offline_reasons.includes(r.id)}
+            onChange={(on) => set('productive_offline_reasons', on
+              ? [...draft.productive_offline_reasons, r.id]
+              : draft.productive_offline_reasons.filter((x) => x !== r.id))}
+            hint={r.hint} />
+        ))}
       </Card>
 
       <Card title="When monitoring happens">
