@@ -746,7 +746,7 @@ test('plans decide which features an organisation gets; trials get everything', 
   await db.query(`update subscriptions set plan = 'trial' where organization_id = $1`, [ctx.orgId]);
   assert.ok((await features()).includes('goals'));
   await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
-  assert.deepEqual(await features(), ['team_categories', 'team_schedules']);
+  assert.deepEqual(await features(), ['team_categories', 'team_schedules', 'trends']);
   await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)'), /not included in your plan/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
   await rejects(asAnon('select get_my_features()'), /permission denied/);
@@ -788,11 +788,8 @@ test('team category rules override company rules for that team only', async () =
 test('daily usage is filled nightly, scoped like activity, and removed with deleted activity', async () => {
   await db.query(`select refresh_daily_usage($1, '2026-10-04')`, [ctx.orgId]);
   const usage = await asUser(ctx.ownerAuth,
-    `select kind, name, active_seconds from daily_usage where employee_id = $1 and day = '2026-10-04' order by kind`, [ctx.empId]);
-  assert.deepEqual(usage.rows, [
-    { kind: 'app', name: 'Google Chrome', active_seconds: 1800 },
-    { kind: 'domain', name: 'youtube.com', active_seconds: 1800 },
-  ]);
+    `select app_name, domain, active_seconds from daily_usage where employee_id = $1 and day = '2026-10-04'`, [ctx.empId]);
+  assert.deepEqual(usage.rows, [{ app_name: 'Google Chrome', domain: 'youtube.com', active_seconds: 1800 }]);
   const other = await asUser(ctx.otherOwnerAuth, 'select count(*)::int as n from daily_usage');
   assert.equal(other.rows[0].n, 0, 'other organisations see nothing');
   await rejects(asUser(ctx.ownerAuth, `delete from daily_usage`), /permission denied/);
@@ -880,6 +877,88 @@ test('productivity goals per company or team, limited to the right managers', as
   await rejects(asUser(ctx.ownerAuth, 'update productivity_goals set productive_hours = 1'), /permission denied/);
   const audit = await asUser(ctx.ownerAuth, `select count(*)::int as n from audit_log where action in ('goal_saved', 'goal_removed')`);
   assert.equal(audit.rows[0].n, 4);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
+test('analytics: trends, workload, capacity and software usage', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await asUser(ctx.ownerAuth, `select set_app_category('domain', 'facebook.com', 'unproductive')`);
+  const device = randomUUID();
+  await db.query('insert into devices (id, organization_id, employee_id, hostname) values ($1, $2, $3, $4)',
+    [device, ctx.orgId, ctx.empId, 'LAPTOP-03']);
+  // Tuesday 6 Oct: 4 h in Excel (productive), 1 h on Facebook (unproductive). Segments are at most an hour long.
+  for (const [start, end, app, domain] of [
+    ['06:00', '07:00', 'Microsoft Excel', null], ['07:00', '08:00', 'Microsoft Excel', null],
+    ['08:00', '09:00', 'Microsoft Excel', null], ['09:00', '10:00', 'Microsoft Excel', null],
+    ['10:00', '11:00', 'Google Chrome', 'facebook.com']]) {
+    await db.query(
+      `insert into activity_segments (id, organization_id, employee_id, device_id, state, started_at, ended_at, app_name, domain, updated_at)
+       values ($1, $2, $3, $4, 'active', $5, $6, $7, $8, $6)`,
+      [randomUUID(), ctx.orgId, ctx.empId, device, `2026-10-06T${start}:00Z`, `2026-10-06T${end}:00Z`, app, domain]);
+  }
+  await db.query(`select refresh_daily_usage($1, '2026-10-06')`, [ctx.orgId]);
+
+  const days = await asUser(ctx.ownerAuth, `select period_start::text as d, people, person_days, active_seconds::int as a,
+    productive_seconds::int as p, unproductive_seconds::int as u from get_trend('2026-10-05', '2026-10-11', 'day')`);
+  assert.equal(days.rows.length, 7);
+  assert.deepEqual(days.rows.find((r) => r.d === '2026-10-06'), { d: '2026-10-06', people: 1, person_days: 1, a: 18000, p: 14400, u: 3600 });
+  assert.equal(days.rows.filter((r) => r.a > 0).length, 1);
+  const weeks = await asUser(ctx.ownerAuth, `select period_start::text as d, active_seconds::int as a from get_trend('2026-10-05', '2026-10-11', 'week')`);
+  assert.deepEqual(weeks.rows, [{ d: '2026-10-05', a: 18000 }]);
+  const ownerOnly = await asUser(ctx.ownerAuth, `select sum(active_seconds)::int as a from get_trend('2026-10-05', '2026-10-11', 'day', null, $1)`, [ctx.ownerId]);
+  assert.equal(ownerOnly.rows[0].a, 0);
+  const today = await asUser(ctx.ownerAuth, `select active_seconds::int as a from get_trend(
+    (now() at time zone 'Africa/Johannesburg')::date, (now() at time zone 'Africa/Johannesburg')::date)`);
+  assert.ok(today.rows[0].a > 0, 'today is read live, before the nightly job');
+
+  const workload = await asUser(ctx.ownerAuth, `select employee_id, days_worked, productive_seconds::int as p, goal_hours::float as g,
+    utilisation::float as util, status from get_workload('2026-10-06', '2026-10-06')`);
+  assert.deepEqual(workload.rows.find((r) => r.employee_id === ctx.empId),
+    { employee_id: ctx.empId, days_worked: 1, p: 14400, g: 6.5, util: 61.5, status: 'under' });
+  assert.equal(workload.rows.find((r) => r.employee_id === ctx.ownerId).status, 'no_data');
+  const mary = await asUser(ctx.mgrAuth, `select employee_id from get_workload('2026-10-06', '2026-10-06')`);
+  assert.ok(mary.rows.every((r) => [ctx.empId, ctx.mgrId].includes(r.employee_id)), 'team managers see their team only');
+
+  await asUser(ctx.ownerAuth, 'select set_workforce_cost(null, 390000)');
+  const cap = await asUser(ctx.ownerAuth, `select team_id, people, goal_hours::float as goal, avg_productive_hours::float as avg,
+    gap_hours::float as gap, fte_gap::float as fte, annual_cost::float as annual, monthly_cost::float as monthly
+    from get_capacity('2026-10-06', '2026-10-06')`);
+  assert.deepEqual(cap.rows, [{ team_id: ctx.teamId, people: 1, goal: 6.5, avg: 4, gap: 2.5, fte: 0.38, annual: 150000, monthly: 12500 }]);
+  const maryCap = await asUser(ctx.mgrAuth, `select annual_salary, annual_cost from get_capacity('2026-10-06', '2026-10-06')`);
+  assert.deepEqual(maryCap.rows, [{ annual_salary: null, annual_cost: null }], 'salary figures are for owners and company-wide managers');
+  await rejects(asUser(ctx.mgrAuth, 'select set_workforce_cost(null, 1)'), /Not allowed/);
+  assert.equal((await asUser(ctx.mgrAuth, 'select count(*)::int as n from workforce_costs')).rows[0].n, 0);
+  await rejects(asUser(ctx.mgrAuth, 'select * from get_workforce_costs()'), /Not allowed/);
+  const costs = await asUser(ctx.ownerAuth, 'select team_id, annual_salary::float as s from get_workforce_costs()');
+  assert.deepEqual(costs.rows, [{ team_id: null, s: 390000 }]);
+
+  await asUser(ctx.ownerAuth, `select set_software_licence('app', 'Microsoft Excel', 10, 250)`);
+  await asUser(ctx.ownerAuth, `select set_software_licence('app', 'Adobe Photoshop', 5, null)`);
+  await rejects(asUser(ctx.mgrAuth, `select set_software_licence('app', 'Slack', 5, null)`), /Not allowed/);
+  const apps = await asUser(ctx.ownerAuth, `select name, active_seconds::int as a, users, category, licence_seats as seats
+    from get_software_usage('2026-10-06', '2026-10-06', 'app')`);
+  assert.deepEqual(apps.rows, [
+    { name: 'Microsoft Excel', a: 14400, users: 1, category: 'productive', seats: 10 },
+    { name: 'Google Chrome', a: 3600, users: 1, category: 'uncategorised', seats: null },
+    { name: 'adobe photoshop', a: 0, users: 0, category: 'uncategorised', seats: 5 },
+  ]);
+  const teamApps = await asUser(ctx.ownerAuth, `select name, category from get_software_usage('2026-10-06', '2026-10-06', 'app', $1)`,
+    [ctx.salesTeamId]);
+  assert.deepEqual(teamApps.rows, [], 'unused licences are only listed company-wide');
+  const sites = await asUser(ctx.ownerAuth, `select name, active_seconds::int as a, category, people
+    from get_software_usage('2026-10-06', '2026-10-06', 'domain')`);
+  assert.equal(sites.rows[0].name, 'facebook.com');
+  assert.equal(sites.rows[0].category, 'unproductive');
+  assert.ok(sites.rows[0].people >= 3);
+
+  await rejects(asUser(ctx.empAuth, `select * from get_trend('2026-10-05', '2026-10-11')`), /Not allowed/);
+  await rejects(asAnon(`select * from get_trend('2026-10-05', '2026-10-11')`), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, `select * from get_trend('2025-01-01', '2026-10-11')`), /at most 400 days/);
+  await rejects(asUser(ctx.ownerAuth, `select * from person_days($1, null, null, '2026-10-06', '2026-10-06')`, [ctx.orgId]), /permission denied/);
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await asUser(ctx.ownerAuth, `select * from get_trend('2026-10-05', '2026-10-11')`);
+  await rejects(asUser(ctx.ownerAuth, `select * from get_workload('2026-10-05', '2026-10-11')`), /not included in your plan/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 

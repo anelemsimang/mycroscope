@@ -96,6 +96,7 @@ export default function Dashboard() {
         <Card title="Quick Actions">
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <ActionButton title="Reports" onPress={() => router.push('/reports')} />
+            <ActionButton title="Insights" onPress={() => router.push('/insights')} />
             <ActionButton title="Register Employee" onPress={() => router.push('/register')} />
             <ActionButton title="Alerts" onPress={() => router.push('/alerts')} />
             <ActionButton title="Settings" onPress={() => router.push('/settings')} />

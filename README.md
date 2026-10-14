@@ -165,6 +165,21 @@ and used during working hours, e.g. the agent was removed, the PC restarted and 
 - **Daily usage** per person, app and website, filled nightly and back-filled for stored history, for
   company-wide reports.
 
+`20261015090000_workforce_analytics.sql` (apply after the one above) adds the **Insights** screen in the manager app:
+- **Trends** (Standard and up): productive and active time per person-day by day, week or month, compared with the
+  previous period of the same length.
+- **Workload** (Business and up): each person's productive time per day worked against their goal, flagged as
+  under-utilised, healthy or over-utilised.
+- **Capacity** (Business and up): the gap to the goal per team in full-time equivalents. With an optional average
+  salary (owners and company-wide managers only; readable only through `get_workforce_costs`), the gap is also shown
+  in rand.
+- **Software** (Business and up): active time and number of users per app or website, plus licence counts and
+  monthly cost per seat to show unused licences.
+
+It rebuilds `daily_usage` as one row per person, day, app and website (so website rules can override browser
+rules) and back-fills it from stored activity. Reports cover at most 400 days per request. Only tracked computer time
+is counted, so meetings and work away from the computer are not included in any of these figures.
+
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.
 

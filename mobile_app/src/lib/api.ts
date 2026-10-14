@@ -148,7 +148,7 @@ export type Category = 'productive' | 'neutral' | 'unproductive';
 export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category; team_id: string | null }
 
 /** Plan features (see plan_features in the database). */
-export type Feature = 'team_categories' | 'team_schedules' | 'goals';
+export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage';
 
 export interface WorkSchedule {
   id: string;
@@ -161,6 +161,61 @@ export interface WorkSchedule {
 
 export interface Goal { id: string; team_id: string | null; productive_hours: number; under_percent: number; over_percent: number }
 export interface CategoryTotal { category: Category | 'uncategorised'; active_seconds: number; idle_seconds: number }
+
+export type Granularity = 'day' | 'week' | 'month';
+export interface TrendPoint {
+  period_start: Ymd;
+  people: number;
+  person_days: number;
+  active_seconds: number;
+  idle_seconds: number;
+  productive_seconds: number;
+  unproductive_seconds: number;
+}
+export interface SoftwareUsage {
+  name: string;
+  active_seconds: number;
+  users: number;
+  /** Everyone in scope who could have used it (the denominator for adoption). */
+  people: number;
+  category: Category | 'uncategorised';
+  licence_id: string | null;
+  licence_seats: number | null;
+  monthly_cost_per_seat: number | null;
+}
+export type WorkloadStatus = 'no_goal' | 'no_data' | 'under' | 'healthy' | 'over';
+export interface WorkloadRow {
+  employee_id: string;
+  name: string;
+  team_id: string | null;
+  team_name: string | null;
+  days_worked: number;
+  active_seconds: number;
+  productive_seconds: number;
+  goal_hours: number | null;
+  under_percent: number | null;
+  over_percent: number | null;
+  /** Productive time per day worked as a percentage of the daily goal. */
+  utilisation: number | null;
+  status: WorkloadStatus;
+}
+export interface CapacityRow {
+  team_id: string | null;
+  team_name: string | null;
+  people: number;
+  person_days: number;
+  productive_seconds: number;
+  goal_hours: number | null;
+  avg_productive_hours: number;
+  /** Negative when the team is above its goal. */
+  gap_hours: number | null;
+  fte_gap: number | null;
+  /** Null unless the caller is the owner or a manager not limited to teams. */
+  annual_salary: number | null;
+  annual_cost: number | null;
+  monthly_cost: number | null;
+}
+export interface WorkforceCost { team_id: string | null; annual_salary: number }
 
 export type DataRequestKind = 'access' | 'correction' | 'objection' | 'deletion' | 'other';
 export type DataRequestStatus = 'open' | 'in_progress' | 'completed' | 'rejected';
@@ -281,6 +336,15 @@ async function rpc<T>(fn: string, args: Record<string, unknown> = {}): Promise<T
 }
 
 const num = (v: unknown) => Number(v ?? 0);
+const optNum = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+
+function nullableNumeric<T extends object>(rows: T[], keys: (keyof T)[]): T[] {
+  return rows.map((r) => {
+    const copy = { ...r };
+    for (const k of keys) (copy as Record<keyof T, unknown>)[k] = optNum(r[k]);
+    return copy;
+  });
+}
 
 function numeric<T extends object>(rows: T[] | null, keys: (keyof T)[]): T[] {
   return (rows ?? []).map((r) => {
@@ -573,6 +637,40 @@ export const api = {
       p_team: team, p_productive_hours: productiveHours, p_under_percent: underPercent, p_over_percent: overPercent,
     }),
   deleteGoal: (team: string | null) => rpc<void>('delete_goal', { p_team: team }),
+
+  // ---- workforce analytics (at most 400 days per request) ----------------------
+  trend: async (from: Ymd, to: Ymd, granularity: Granularity, team: string | null = null, employee: string | null = null) =>
+    numeric(
+      await rpc<TrendPoint[]>('get_trend', { p_from: from, p_to: to, p_granularity: granularity, p_team: team, p_employee: employee }),
+      ['active_seconds', 'idle_seconds', 'productive_seconds', 'unproductive_seconds'],
+    ),
+  softwareUsage: async (from: Ymd, to: Ymd, kind: 'app' | 'domain', team: string | null = null) =>
+    nullableNumeric(
+      numeric(await rpc<SoftwareUsage[]>('get_software_usage', { p_from: from, p_to: to, p_kind: kind, p_team: team }),
+        ['active_seconds']),
+      ['monthly_cost_per_seat'],
+    ),
+  /** Owners and managers not limited to teams. The name is matched case-insensitively. */
+  setLicence: (kind: 'app' | 'domain', name: string, seats: number, monthlyCostPerSeat: number | null) =>
+    rpc<void>('set_software_licence', { p_kind: kind, p_name: name, p_seats: seats, p_monthly_cost_per_seat: monthlyCostPerSeat }),
+  deleteLicence: (id: string) => rpc<void>('delete_software_licence', { p_id: id }),
+  workload: async (from: Ymd, to: Ymd, team: string | null = null) =>
+    nullableNumeric(
+      numeric(await rpc<WorkloadRow[]>('get_workload', { p_from: from, p_to: to, p_team: team }),
+        ['active_seconds', 'productive_seconds']),
+      ['goal_hours', 'utilisation'],
+    ),
+  capacity: async (from: Ymd, to: Ymd) =>
+    nullableNumeric(
+      numeric(await rpc<CapacityRow[]>('get_capacity', { p_from: from, p_to: to }),
+        ['productive_seconds', 'avg_productive_hours']),
+      ['goal_hours', 'gap_hours', 'fte_gap', 'annual_salary', 'annual_cost', 'monthly_cost'],
+    ),
+  workforceCosts: async () =>
+    numeric(await rpc<WorkforceCost[]>('get_workforce_costs'), ['annual_salary']),
+  /** team null = the company average. A null salary removes it. */
+  setWorkforceCost: (team: string | null, annualSalary: number | null) =>
+    rpc<void>('set_workforce_cost', { p_team: team, p_annual_salary: annualSalary }),
 };
 
 /** Functions only platform operators (the SaaS provider, signed in with two-factor) may call. */

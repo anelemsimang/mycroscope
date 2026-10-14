@@ -79,6 +79,7 @@ export default function AppLayout() {
         <Stack.Screen name="teams" options={inner('Teams')} />
         <Stack.Screen name="work-hours" options={inner('Working Hours')} />
         <Stack.Screen name="goals" options={inner('Productivity Goals')} />
+        <Stack.Screen name="insights" options={inner('Insights')} />
         <Stack.Screen name="billing" options={inner('Subscription & Billing')} />
         <Stack.Screen name="install-key" options={inner('Agent Install Key')} />
         <Stack.Screen name="support-access" options={inner('Support Access')} />
