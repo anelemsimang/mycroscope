@@ -290,6 +290,14 @@ overrides the default `gpt-4.1-mini`. Do not put the key in the app. Then run `s
 in the SQL editor after replacing the project URL. The same `CRON_SECRET` as the manager emails is reused. Weekly
 email uses the existing `RESEND_API_KEY` and `EMAIL_FROM`. The desktop app does not change for this.
 
+`20261021090000_free_plan.sql` (apply after the one above) keeps sign-up as a **14-day trial**, then moves the company
+to the **free plan**. The nightly job records that: plan `free`, up to 3 active people, and detailed activity kept for
+30 days. Paid reports (trends, goals, workload, AI tools, written advice, and the rest) are not included. Recording
+continues for the people already on the free plan. A fourth person cannot be added or switched back on until someone
+is deactivated or the company pays. People already over 3 stay active until the company deactivates them. Paystack
+checkout is unchanged and moves a free company to Standard. The operator console can also set the plan to free.
+The desktop app does not change for this.
+
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.
 

@@ -12,7 +12,7 @@ import { CASE_STUDY_MONTHS, statusLine } from '@/lib/operator';
 import { useAsync } from '@/lib/useAsync';
 
 const ZONE = 'Africa/Johannesburg';
-const PLANS = ['trial', 'standard', 'business', 'enterprise'] as const;
+const PLANS = ['trial', 'free', 'standard', 'business', 'enterprise'] as const;
 const STATUSES = ['trialing', 'active', 'past_due', 'suspended', 'cancelled'] as const;
 const STATUS_LABEL: Record<(typeof STATUSES)[number], string> = {
   trialing: 'Trial', active: 'Active', past_due: 'Overdue', suspended: 'Suspended', cancelled: 'Cancelled',
@@ -67,7 +67,7 @@ export default function OperatorOrgScreen() {
 
 function CaseStudyCard({ org, onSaved }: { org: OperatorOrg; onSaved: () => void }) {
   const running = inCaseStudy(org);
-  const paying = (org.status === 'active' || org.status === 'past_due') && org.plan !== 'trial';
+  const paying = (org.status === 'active' || org.status === 'past_due') && org.plan !== 'trial' && org.plan !== 'free';
   const [months, setMonths] = useState<(typeof CASE_STUDY_MONTHS)[number]>('12');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);

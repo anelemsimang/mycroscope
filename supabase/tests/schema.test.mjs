@@ -422,12 +422,13 @@ test('seat limits block new employees and reactivation', async () => {
   await db.query('update subscriptions set seats = 25 where organization_id = $1', [ctx.orgId]);
 });
 
-test('an expired trial makes the organisation read-only', async () => {
+test('an expired trial becomes the free plan and keeps recording', async () => {
   await db.query(`update subscriptions set trial_ends_at = now() - interval '1 hour' where organization_id = $1`, [ctx.orgId]);
   const s = await asUser(ctx.ownerAuth, 'select level from get_my_service_status()');
-  assert.equal(s.rows[0].level, 'read_only');
-  await rejects(insertSegment(ctx.empAuth, segment({ start: minutesAgo(9), end: minutesAgo(8) })), /row-level security/);
-  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Late', 'late@acme.co.za')`), /subscription is not active/);
+  assert.equal(s.rows[0].level, 'full');
+  assert.deepEqual((await asUser(ctx.ownerAuth, 'select get_my_features() as f')).rows[0].f, []);
+  await insertSegment(ctx.empAuth, segment({ start: minutesAgo(20), end: minutesAgo(19) }));
+  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Late', 'late@acme.co.za')`), /free plan includes 3 people/);
   const still = await asUser(ctx.ownerAuth, 'select count(*)::int as n from activity_segments');
   assert.ok(still.rows[0].n > 0, 'existing data stays readable');
 
@@ -1432,6 +1433,46 @@ test('written advice: off until switched on, and the weekly pack hides names', a
   const quiet = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
   assert.doesNotMatch(quiet.notice_text, /OpenAI/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
+test('the nightly job records an ended trial as the free plan, and payment moves it to Standard', async () => {
+  const before = (await db.query(
+    'select plan, status, seats, trial_ends_at, current_period_end from subscriptions where organization_id = $1',
+    [ctx.orgId])).rows[0];
+  const retention = (await db.query(
+    'select retention_days from organization_settings where organization_id = $1', [ctx.orgId])).rows[0].retention_days;
+  await db.query(`update subscriptions set plan = 'trial', status = 'trialing', seats = 25,
+      trial_ends_at = now() + interval '1 day', current_period_end = null where organization_id = $1`, [ctx.orgId]);
+  await db.query('update organization_settings set retention_days = 90 where organization_id = $1', [ctx.orgId]);
+  const extra = (await asUser(ctx.ownerAuth, `select employee_id from create_employee('Extra Free', 'extra-free@acme.co.za')`)).rows[0];
+  await db.query('update employees set is_active = false where id = $1', [extra.employee_id]);
+  await db.query(`update subscriptions set trial_ends_at = now() - interval '1 hour' where organization_id = $1`, [ctx.orgId]);
+  const n = (await db.query('select convert_expired_trials() as n')).rows[0].n;
+  assert.ok(Number(n) >= 1);
+  const after = (await db.query('select plan, status, seats from subscriptions where organization_id = $1', [ctx.orgId])).rows[0];
+  assert.equal(after.plan, 'free');
+  assert.equal(after.status, 'active');
+  assert.equal(after.seats, 3);
+  assert.equal((await db.query('select retention_days from organization_settings where organization_id = $1',
+    [ctx.orgId])).rows[0].retention_days, 30);
+  await rejects(asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
+    [JSON.stringify({ retention_days: 90 })]), /30 days/);
+  await rejects(asUser(ctx.ownerAuth, 'select update_employee($1, null, null, true)', [extra.employee_id]),
+    /free plan includes 3 people/);
+  await asUser(ctx.ownerAuth, `select delete_employee($1, 'test cleanup')`, [extra.employee_id]);
+  assert.equal((await db.query(
+    `select apply_payment($1, 'free-upgrade-test', 100, 'ZAR', 5, 1, null, '{}'::jsonb) as ok`, [ctx.orgId])).rows[0].ok, true);
+  const paid = (await db.query('select plan, seats from subscriptions where organization_id = $1', [ctx.orgId])).rows[0];
+  assert.equal(paid.plan, 'standard');
+  assert.equal(paid.seats, 5);
+
+  await db.query(`update subscriptions set plan = $2, status = $3, seats = $4, trial_ends_at = $5, current_period_end = $6
+      where organization_id = $1`,
+    [ctx.orgId, before.plan, before.status, before.seats, before.trial_ends_at, before.current_period_end]);
+  await db.query('update organization_settings set retention_days = $2 where organization_id = $1', [ctx.orgId, retention]);
+  await db.query(`delete from payments where reference = 'free-upgrade-test'`);
+  await db.query(`delete from audit_log where organization_id = $1 and action = 'payment_received'
+      and details ->> 'reference' = 'free-upgrade-test'`, [ctx.orgId]);
 });
 
 test('the sign-in reminder migration republishes every notice without changing settings', async () => {

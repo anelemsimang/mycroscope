@@ -64,16 +64,19 @@ export default function Billing() {
       <Card title="Subscription">
         <InfoGrid items={[
           { label: 'Status', value: caseStudy ? 'Free case study' : STATUS_LABEL[s.status] ?? s.status },
-          { label: 'Plan', value: s.plan === 'trial' ? 'Trial' : s.plan[0].toUpperCase() + s.plan.slice(1) },
-          { label: 'Seats in use', value: `${s.seats_used} of ${s.seats}` },
+          { label: 'Plan', value: s.plan === 'trial' ? 'Trial' : s.plan === 'free' ? 'Free' : s.plan[0].toUpperCase() + s.plan.slice(1) },
+          { label: 'Seats in use', value: `${s.seats_used} of ${s.plan === 'free' ? Math.min(s.seats, 3) : s.seats}` },
           ...(caseStudy ? [{ label: 'Case study ends', value: formatDate(s.case_study_until, profile.timezone) }] : []),
-          s.status === 'trialing'
-            ? { label: caseStudy ? 'Then trial until' : 'Trial ends', value: formatDate(s.trial_ends_at, profile.timezone) }
-            : { label: 'Paid until', value: formatDate(s.current_period_end, profile.timezone) },
+          s.plan === 'free'
+            ? { label: 'Includes', value: '3 people, 30 days of detail' }
+            : s.status === 'trialing'
+              ? { label: caseStudy ? 'Then trial until' : 'Trial ends', value: formatDate(s.trial_ends_at, profile.timezone) }
+              : { label: 'Paid until', value: formatDate(s.current_period_end, profile.timezone) },
         ]} />
         <Text style={styles.hint}>
-          A seat is one active employee (including managers). Deactivated employees don't use a seat. If a subscription
-          lapses, everything stays viewable and exportable, but the desktop app stops recording until it is renewed.
+          {s.plan === 'free'
+            ? 'The free plan keeps monitoring for up to 3 people and keeps detailed activity for 30 days. Paid reports are not included. If more than 3 people are still active, deactivate people until 3 remain; no one new can be added until then. Pay below to move to Standard.'
+            : 'A seat is one active employee (including managers). Deactivated employees don\'t use a seat. A new company starts with 14 days of every feature, then the free plan. If a paid subscription lapses, everything stays viewable and exportable, but the desktop app stops recording until it is renewed.'}
         </Text>
       </Card>
 
