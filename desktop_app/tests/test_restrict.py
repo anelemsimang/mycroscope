@@ -1,7 +1,9 @@
 """Restricted programs are minimised only after the notice is acknowledged, and only while monitoring."""
 
 import os
+import socket
 import sys
+import threading
 import unittest
 from datetime import datetime, timezone
 
@@ -9,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.engine import TrackingSettings  # noqa: E402
 from core.restrict import Restrictor, matches_app, matches_domain, parse_restrictions  # noqa: E402
+from core.siteblock import SiteBlock, active_domains, proxy_is_free  # noqa: E402
 from core.schedule import Schedule  # noqa: E402
 
 
@@ -69,6 +72,56 @@ class RestrictTests(unittest.TestCase):
         evening = datetime(2026, 10, 14, 18, 0, tzinfo=timezone.utc)  # 20:00 in Johannesburg
         self.assertTrue(schedule.is_work_time(evening))
         self.assertFalse(schedule.during_work_hours(evening))
+
+    def test_a_website_is_blocked_only_while_monitoring(self):
+        rules = parse_restrictions(RULES)
+        self.assertEqual(active_domains(rules, monitoring=True, paused=False, in_work_hours=True), ("facebook.com",))
+        self.assertEqual(active_domains(rules, monitoring=True, paused=True, in_work_hours=True), ())
+        self.assertEqual(active_domains(rules, monitoring=False, paused=False, in_work_hours=True), ())
+        self.assertFalse(proxy_is_free({"ProxyEnable": 1, "AutoConfigURL": ""}))
+        self.assertFalse(proxy_is_free({"ProxyEnable": 0, "AutoConfigURL": "http://proxy.example/pac"}))
+        self.assertTrue(proxy_is_free({"ProxyEnable": 0, "AutoConfigURL": ""}))
+        hours = parse_restrictions([{"kind": "domain", "pattern": "facebook.com", "work_hours_only": True}])
+        self.assertEqual(active_domains(hours, monitoring=True, paused=False, in_work_hours=False), ())
+        self.assertEqual(active_domains(hours, monitoring=True, paused=False, in_work_hours=True), ("facebook.com",))
+
+    def test_the_proxy_refuses_the_named_site_and_lets_another_through(self):
+        gate = SiteBlock.__new__(SiteBlock)
+        gate._patterns = ("mycroscope-policy-probe.invalid",)
+        gate._server = None
+        gate._thread = None
+        gate._port = 0
+        gate._lock = threading.Lock()
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        allowed_port = listener.getsockname()[1]
+        seen = []
+
+        def accept_one():
+            conn, _addr = listener.accept()
+            seen.append(conn.recv(64))
+            conn.sendall(b"ok")
+            conn.close()
+
+        threading.Thread(target=accept_one, daemon=True).start()
+        gate._start_locked()
+        try:
+            blocked = socket.create_connection(("127.0.0.1", gate._port), 2)
+            blocked.sendall(b"CONNECT mycroscope-policy-probe.invalid:443 HTTP/1.1\r\nHost: x\r\n\r\n")
+            self.assertTrue(blocked.recv(80).startswith(b"HTTP/1.1 403"))
+            blocked.close()
+            allowed = socket.create_connection(("127.0.0.1", gate._port), 2)
+            allowed.sendall(f"CONNECT 127.0.0.1:{allowed_port} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+            self.assertTrue(allowed.recv(80).startswith(b"HTTP/1.1 200"))
+            allowed.sendall(b"ping")
+            self.assertEqual(allowed.recv(8), b"ok")
+            allowed.close()
+        finally:
+            gate._server.close()
+            gate._server = None
+            listener.close()
+        self.assertEqual(seen, [b"ping"])
 
 
 if __name__ == "__main__":

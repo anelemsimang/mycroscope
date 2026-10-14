@@ -22,6 +22,7 @@ from core.credentials import CredentialStore
 from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
 from core.restrict import Restrictor
+from core.siteblock import SiteBlock
 from core.files import FileActivityMonitor, FileSettings
 from core.location import PlaceTracker, classify, offices_from_settings, read_wifi_ssid
 from core.offline import REASONS, OfflinePrompt, ReturnTracker, clean_note
@@ -65,6 +66,7 @@ class Agent:
         self.returns = ReturnTracker()
         self.places = PlaceTracker()
         self.restrictor = Restrictor()
+        self.siteblock = SiteBlock()
         self._offline_lock = threading.Lock()
         self._offline_queue: list[OfflinePrompt] = []
         self._engine_lock = threading.Lock()
@@ -482,6 +484,10 @@ class Agent:
                             s.restrictions, sample.app_name, sample.process_name, now,
                             monitoring=True, paused=False, in_work_hours=s.schedule.during_work_hours(now))
 
+                self.siteblock.apply(
+                    s.restrictions, monitoring=block is None, paused=self.paused,
+                    in_work_hours=s.schedule.during_work_hours(now))
+
                 earliest = self.engine.session_started_at if self.engine else None
                 minutes = s.offline_prompt_minutes if isinstance(s.offline_prompt_minutes, int) else 10
                 prompt = self.returns.observe(
@@ -524,6 +530,7 @@ class Agent:
             self.on_change("state")
         finally:
             monitor.close()
+            self.siteblock.restore()
 
     def _stop_tracker_thread(self) -> None:
         self._stop_tracking.set()
@@ -536,6 +543,7 @@ class Agent:
         if not self.tracking:
             return
         self._stop_tracker_thread()
+        self.siteblock.restore()
         if self.files:
             self.files.stop()
             self.files = None

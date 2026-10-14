@@ -1476,7 +1476,7 @@ test('the nightly job records an ended trial as the free plan, and payment moves
       and details ->> 'reference' = 'free-upgrade-test'`, [ctx.orgId]);
 });
 
-test('a restricted program is named in the notice, and a restricted website is not described as blocked', async () => {
+test('a restricted program is named in the notice, and a restricted website is refused in Chrome and Edge', async () => {
   const steam = (await asUser(ctx.ownerAuth,
     `select id from save_alert_rule(null, 'Steam', 'app', 'Steam', 'high', false, true, 'restrict')`)).rows[0];
   const notice = (await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()')).rows[0];
@@ -1487,7 +1487,8 @@ test('a restricted program is named in the notice, and a restricted website is n
     `select id from save_alert_rule(null, 'Facebook', 'domain', 'facebook.com', 'medium', true, true, 'restrict')`)).rows[0];
   const named = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
   assert.match(named.notice_text, /facebook\.com/);
-  assert.match(named.notice_text, /does not block the website/);
+  assert.match(named.notice_text, /Google Chrome and Microsoft Edge refuse/);
+  assert.doesNotMatch(named.notice_text, /does not block the website/);
   await rejects(asUser(ctx.ownerAuth,
     `select save_alert_rule(null, 'Bad', 'app', 'nope.exe', 'low', false, true, 'block')`), /Alert or restrict/);
   await asUser(ctx.ownerAuth, 'select delete_alert_rule($1)', [steam.id]);

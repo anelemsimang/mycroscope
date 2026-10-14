@@ -1,7 +1,7 @@
 """Minimises a restricted program that comes to the front. No administrator rights.
 
-A restricted website is named in the employee notice and raises an alert. It is not blocked:
-per-user Chrome and Edge policy was not confirmed on a PC that is not on a company domain.
+A restricted website is refused by Google Chrome and Microsoft Edge while monitoring is on.
+That is done in core.siteblock. An alert is still recorded if the site is opened.
 """
 
 import ctypes
