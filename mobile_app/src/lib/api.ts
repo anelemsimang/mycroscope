@@ -680,9 +680,12 @@ export const api = {
       ['before_hours', 'after_hours', 'before_days', 'after_days']),
   advisorQuestions: () => rpc<AdvisorQuestion[]>('list_advisor_questions'),
   coachingNotes: () => rpc<CoachingNote[]>('list_coaching_notes'),
-  askAdvisor: async (question: string, from: Ymd, to: Ymd, team?: string | null) => {
+  askAdvisor: async (
+    template: 'week' | 'workload' | 'software' | 'capacity' | 'trend',
+    from: Ymd, to: Ymd, team?: string | null, scope?: string,
+  ) => {
     const { data, error } = await supabase.functions.invoke('work-advisor', {
-      body: { question, from, to, team: team ?? null },
+      body: { template, from, to, team: team ?? null, scope: scope ?? null },
     });
     if (error) throw error;
     if (!data?.answer) throw new Error(data?.error ?? 'No answer was returned.');

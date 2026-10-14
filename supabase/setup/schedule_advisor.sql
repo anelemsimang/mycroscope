@@ -1,5 +1,5 @@
--- Weekly coaching notes. Run once in the Supabase SQL editor AFTER deploying work-advisor
--- (supabase functions deploy work-advisor --no-verify-jwt) and setting OPENAI_API_KEY.
+-- Weekly reports. Run once in the Supabase SQL editor AFTER deploying work-advisor
+-- (supabase functions deploy work-advisor --no-verify-jwt). No outside API key is required.
 -- Replace the project URL. The cron secret is the same one already stored for manager emails.
 
 create extension if not exists pg_cron;

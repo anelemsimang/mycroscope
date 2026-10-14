@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import {
   quote, safeReturnUrl, signTerms, termsFromTransaction, verifyPaystackSignature, verifyTerms,
 } from './billing.ts';
-import { pseudonymize, restoreNames, scrubQuestion } from './advisor.ts';
+import { pseudonymize, restoreNames, scrubQuestion, writeReport } from './advisor.ts';
 import { clientAddress, isPublicAddress } from './ip.ts';
 import { renderAlert, renderDigest } from './email.ts';
 import {
@@ -190,4 +190,66 @@ test('advice replaces names before sending and puts them back afterwards', () =>
     { name: 'Excel', users: 2 },
   ]);
   assert.equal(restoreNames('Person 10 worked more than Person 1.', people), 'Ann worked more than Sipho Worker.');
+});
+
+test('a report is written from the figures, and leaves out anyone with no time', () => {
+  const text = writeReport('workload', {
+    scope: 'Dispatch',
+    from: '2026-10-05',
+    to: '2026-10-11',
+    personDays: 5,
+    productiveHours: 31,
+    awayHours: 0,
+    trend: [],
+    software: [],
+    capacity: [],
+    workload: [
+      { name: 'Sipho Dlamini', days: 5, productiveHours: 31, utilisation: 112, status: 'over' },
+      { name: 'Ann Botha', days: 0, productiveHours: 0, utilisation: null, status: 'no_data' },
+    ],
+  });
+  assert.match(text, /Workload/);
+  assert.match(text, /Dispatch/);
+  assert.match(text, /Sipho Dlamini/);
+  assert.match(text, /112% of the goal/);
+  assert.doesNotMatch(text, /Ann Botha/);
+  assert.doesNotMatch(text, /salary|pay/i);
+});
+
+test('an empty period says there is not enough activity', () => {
+  const text = writeReport('week', {
+    scope: 'The whole company',
+    from: '2026-10-05',
+    to: '2026-10-11',
+    personDays: 0,
+    productiveHours: 0,
+    awayHours: 0,
+    trend: [],
+    workload: [],
+    software: [],
+    capacity: [],
+  });
+  assert.match(text, /not enough recorded activity/);
+});
+
+test('a trend report says when the later days were higher', () => {
+  const text = writeReport('trend', {
+    scope: 'The whole company',
+    from: '2026-10-05',
+    to: '2026-10-08',
+    personDays: 8,
+    productiveHours: 50,
+    awayHours: 2,
+    trend: [
+      { productiveHours: 8, awayHours: 0 },
+      { productiveHours: 9, awayHours: 0 },
+      { productiveHours: 16, awayHours: 1 },
+      { productiveHours: 17, awayHours: 1 },
+    ],
+    workload: [],
+    software: [],
+    capacity: [],
+  });
+  assert.match(text, /higher toward the end/);
+  assert.match(text, /away from the computer was counted as productive/);
 });

@@ -1396,7 +1396,8 @@ test('written advice: off until switched on, and the weekly pack hides names', a
   await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
     [JSON.stringify({ advisor_enabled: true })]);
   const notice = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
-  assert.match(notice.notice_text, /OpenAI in the United States/);
+  assert.match(notice.notice_text, /written inside Mycroscope/);
+  assert.doesNotMatch(notice.notice_text, /OpenAI/);
   await rejects(asUser(ctx.empAuth, `select save_advisor_question('How is the week?', 'Fine.', null)`), /Not allowed/);
   await rejects(asUser(ctx.ownerAuth, 'select advisor_pack($1, null, current_date - 3, current_date)', [ctx.orgId]),
     /permission denied/);
@@ -1431,7 +1432,7 @@ test('written advice: off until switched on, and the weekly pack hides names', a
   await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
     [JSON.stringify({ advisor_enabled: false })]);
   const quiet = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
-  assert.doesNotMatch(quiet.notice_text, /OpenAI/);
+  assert.doesNotMatch(quiet.notice_text, /written inside Mycroscope/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 

@@ -36,7 +36,7 @@ const TAB_FEATURE: Record<Tab, Feature> = {
 };
 const TAB_LABEL: Record<Tab, string> = {
   trends: 'Trends', workload: 'Workload', capacity: 'Capacity', software: 'Software', where: 'Office days',
-  ai: 'AI tools', advice: 'Advice',
+  ai: 'AI tools', advice: 'Reports',
 };
 
 /** The "last N days" periods end yesterday so a half-finished day doesn't drag the averages down. */
@@ -110,7 +110,11 @@ export default function Insights() {
       {current === 'software' ? <Software from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
       {current === 'where' ? <Where from={range.from} to={range.to} team={teamId} /> : null}
       {current === 'ai' ? <AiTools from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
-      {current === 'advice' ? <Advice from={range.from} to={range.to} team={teamId} /> : null}
+      {current === 'advice' ? (
+        <Advice from={range.from} to={range.to} team={teamId} scope={
+          team === ALL ? (scope.orgWide ? 'The whole company' : 'My teams') : (scope.teams.find((t) => t.id === team)?.name ?? 'This team')
+        } />
+      ) : null}
     </Screen>
   );
 }
@@ -365,22 +369,28 @@ function AiToolBlock({ row, people }: { row: AiAdoptionRow; people: AiPersonUsag
 
 // ---- Advice --------------------------------------------------------------------
 
-function Advice({ from, to, team }: { from: Ymd; to: Ymd; team: string | null }) {
+const REPORTS: { value: 'week' | 'workload' | 'software' | 'capacity' | 'trend'; label: string }[] = [
+  { value: 'week', label: 'Week in review' },
+  { value: 'workload', label: 'Workload' },
+  { value: 'software', label: 'Where time went' },
+  { value: 'capacity', label: 'Capacity' },
+  { value: 'trend', label: 'How it changed' },
+];
+
+function Advice({ from, to, team, scope }: { from: Ymd; to: Ymd; team: string | null; scope: string }) {
   const { data, error, loading, refresh } = useAsync(async () => {
     const [questions, notes] = await Promise.all([api.advisorQuestions(), api.coachingNotes()]);
     return { questions, notes };
   }, []);
-  const [question, setQuestion] = useState('');
+  const [template, setTemplate] = useState<(typeof REPORTS)[number]['value']>('week');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function ask() {
+  async function write() {
     setErr(null);
-    if (question.trim().length < 3) return setErr('Ask a question of at least a few words.');
     setBusy(true);
     try {
-      await api.askAdvisor(question.trim(), from, to, team);
-      setQuestion('');
+      await api.askAdvisor(template, from, to, team, scope);
       refresh();
     } catch (e) {
       setErr(errorMessage(e));
@@ -394,25 +404,23 @@ function Advice({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
   if (!data) return null;
   return (
     <>
-      <Card title="Ask about this period">
+      <Card title="Write a report">
         <Text style={styles.hint}>
-          The answer uses the trends, workload, capacity and software reports for {formatDay(from)} to {formatDay(to)}.
-          Names are replaced with codes before the question is sent to OpenAI in the United States, and put back in the
-          answer below. Pay figures are not sent. Every number in the answer should be one of those report figures.
+          The report is written inside Mycroscope from the figures already stored for {formatDay(from)} to {formatDay(to)}.
+          It names the people it describes. Pay figures are left out. Choose a period of at most 90 days.
           Turn this on under Monitoring & privacy.
         </Text>
-        <Field label="Question" value={question} onChangeText={setQuestion} multiline maxLength={800}
-          placeholder="Who was over their goal last week?" />
+        <Segmented options={REPORTS} value={template} onChange={setTemplate} />
         {err ? <ErrorBanner message={err} /> : null}
-        <Button title="Ask" onPress={ask} loading={busy} />
+        <Button title="Write report" onPress={write} loading={busy} />
       </Card>
-      <Card title="Answers">
-        {data.questions.length === 0 ? <Empty text="No questions yet." /> : null}
+      <Card title="Reports">
+        {data.questions.length === 0 ? <Empty text="No reports yet." /> : null}
         {data.questions.map((q) => <Answer key={q.id} row={q} />)}
       </Card>
       <Card title="Weekly notes">
         <Text style={styles.hint}>
-          A note is written each week for the previous Monday to Sunday, after written advice is switched on.
+          A note is written each week for the previous Monday to Sunday, after written reports are switched on.
           It can also be emailed to managers.
         </Text>
         {data.notes.length === 0 ? <Empty text="No weekly note yet." /> : null}

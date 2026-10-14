@@ -269,13 +269,16 @@ the tool counts toward those hours when the tool's category is productive.
 Monitoring & privacy -> AI tools turns on an alert for tools marked not approved. It stays off until switched on,
 and the employee notice gains a sentence only then. The desktop app does not change for this.
 
-`20261020090000_work_advisor.sql` (apply after the one above) adds **written advice** on Business, Enterprise, and the
-trial. It stays off until an owner switches it on under Monitoring & privacy. A manager asks a question in
-Insights -> Advice. The answer comes from OpenAI, which can only call the existing trends, workload, capacity and
-software reports, using that manager's own sign-in so a team manager only sees their teams. The model does not write
-SQL. Names are replaced with codes such as Person 1 before the question or the figures are sent, and put back in the
-answer stored for the company. Pay figures are left out. The employee notice names OpenAI, the United States, and
-what is sent, and only while the feature is on.
+`20261020090000_work_advisor.sql` (apply after the one above) adds **written reports** on Business, Enterprise, and the
+trial. It stays off until an owner switches it on under Monitoring & privacy. A manager picks a report in
+Insights -> Advice: week in review, workload, where time went, capacity, or how the period changed. The report is
+written inside Mycroscope from the trends, workload, capacity and software figures already stored, using that
+manager's own sign-in so a team manager only sees their teams. Every number in the report comes from those figures.
+Pay figures are left out. Nothing is sent to another company to write the report.
+
+`20261022090000_report_templates.sql` (apply after the free-plan migration) replaces the employee-notice sentence that
+named an outside service. While written reports are on, the notice says the report is written inside Mycroscope from
+figures it already stores. Companies that already had reports switched on get a new notice version.
 
 A weekly note for the previous Monday to Sunday is written for each team, and one for the whole company. Emailing it
 to managers is a separate switch. Deploy the function with JWT verification off; it rejects callers that are neither
@@ -285,14 +288,13 @@ a signed-in user nor the existing cron secret:
 supabase functions deploy work-advisor --no-verify-jwt
 ```
 
-Set `OPENAI_API_KEY` in Supabase secrets (`supabase secrets set OPENAI_API_KEY=...`). An optional `OPENAI_MODEL`
-overrides the default `gpt-4.1-mini`. Do not put the key in the app. Then run `supabase/setup/schedule_advisor.sql`
-in the SQL editor after replacing the project URL. The same `CRON_SECRET` as the manager emails is reused. Weekly
-email uses the existing `RESEND_API_KEY` and `EMAIL_FROM`. The desktop app does not change for this.
+No API key is required. Then run `supabase/setup/schedule_advisor.sql` in the SQL editor after replacing the project
+URL. The same `CRON_SECRET` as the manager emails is reused. Weekly email uses the existing `RESEND_API_KEY` and
+`EMAIL_FROM`. The desktop app does not change for this.
 
 `20261021090000_free_plan.sql` (apply after the one above) keeps sign-up as a **14-day trial**, then moves the company
 to the **free plan**. The nightly job records that: plan `free`, up to 3 active people, and detailed activity kept for
-30 days. Paid reports (trends, goals, workload, AI tools, written advice, and the rest) are not included. Recording
+30 days. Paid reports (trends, goals, workload, AI tools, written reports, and the rest) are not included. Recording
 continues for the people already on the free plan. A fourth person cannot be added or switched back on until someone
 is deactivated or the company pays. People already over 3 stay active until the company deactivates them. Paystack
 checkout is unchanged and moves a free company to Standard. The operator console can also set the plan to free.

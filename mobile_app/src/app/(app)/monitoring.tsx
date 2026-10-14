@@ -249,19 +249,19 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
           hint="Included on Business, Enterprise, and the trial. The list of tools is kept by Mycroscope." />
       </Card>
 
-      <Card title="Written advice">
+      <Card title="Written reports">
         <Text style={styles.hint}>
-          Insights lets a manager ask a question about trends, workload, capacity and software. The weekly note covers
-          the previous full week. Names are replaced with codes such as Person 1 before anything is sent to OpenAI in
-          the United States, and put back in the answer managers see. Pay figures are not sent. Employees are told in
-          the notice while this is on.
+          Insights lets a manager write a report for a period: a week in review, workload, where time went, capacity,
+          or how the period changed. The weekly note covers the previous full week. Reports are written inside
+          Mycroscope from figures already stored, and they name the people they describe. Pay figures are left out.
+          Nothing is sent to another company. Employees are told in the notice while this is on.
         </Text>
         {!advisorAllowed ? (
           <Text style={[styles.hint, { color: colors.danger }]}>
-            Written advice is not included in your plan. Contact Mycroscope to upgrade.
+            Written reports are not included in your plan. Contact Mycroscope to upgrade.
           </Text>
         ) : null}
-        <ToggleRow label="Allow written advice" value={draft.advisor_enabled}
+        <ToggleRow label="Allow written reports" value={draft.advisor_enabled}
           disabled={!advisorAllowed && !draft.advisor_enabled}
           onChange={(v) => set('advisor_enabled', v)}
           hint="Included on Business, Enterprise, and the trial. Stays off until you switch it on." />
