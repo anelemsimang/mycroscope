@@ -252,4 +252,74 @@ test('a trend report says when the later days were higher', () => {
   });
   assert.match(text, /higher toward the end/);
   assert.match(text, /away from the computer was counted as productive/);
+  assert.match(text, /The main point is the change through the period/);
 });
+
+const quietWeek = {
+  scope: 'Dispatch',
+  from: '2026-10-05',
+  to: '2026-10-11',
+  personDays: 5,
+  productiveHours: 30,
+  awayHours: 0,
+  trend: [
+    { productiveHours: 6, awayHours: 0 },
+    { productiveHours: 6, awayHours: 0 },
+    { productiveHours: 6, awayHours: 0 },
+    { productiveHours: 6, awayHours: 0 },
+  ],
+  software: [],
+  capacity: [],
+  workload: [
+    { name: 'Sipho Dlamini', days: 5, productiveHours: 30, utilisation: 100, status: 'healthy' },
+  ],
+};
+
+test('a steady week says nothing would change the conclusion', () => {
+  const text = writeReport('week', quietWeek);
+  assert.match(text, /Nothing in this report is far above or far below/);
+  assert.match(text, /healthy range/);
+  assert.doesNotMatch(text, /The main point is workload/);
+});
+
+test('a person well over the goal leads, ahead of a rise in the period', () => {
+  const text = writeReport('week', {
+    ...quietWeek,
+    productiveHours: 40,
+    trend: [
+      { productiveHours: 8, awayHours: 0 },
+      { productiveHours: 8, awayHours: 0 },
+      { productiveHours: 10, awayHours: 0 },
+      { productiveHours: 11, awayHours: 0 },
+    ],
+    workload: [
+      { name: 'Sipho Dlamini', days: 5, productiveHours: 40, utilisation: 140, status: 'over' },
+      { name: 'Ann Botha', days: 5, productiveHours: 30, utilisation: 100, status: 'healthy' },
+    ],
+  });
+  const lead = text.split('\n\n')[1] ?? '';
+  assert.match(lead, /well above the goal/);
+  assert.match(lead, /Sipho Dlamini/);
+  assert.match(lead, /140% of the goal/);
+  assert.match(text, /higher toward the end/);
+  const body = text.split('\n\n').slice(2).join('\n');
+  assert.match(body, /Ann Botha/);
+  assert.doesNotMatch(lead, /Ann Botha/);
+});
+
+test('one app taking most of the open time becomes the conclusion', () => {
+  const text = writeReport('software', {
+    ...quietWeek,
+    workload: [],
+    trend: [],
+    software: [
+      { name: 'Excel', users: 6, hours: 20 },
+      { name: 'Chrome', users: 2, hours: 4 },
+    ],
+  });
+  const lead = text.split('\n\n')[1] ?? '';
+  assert.match(lead, /where time went/);
+  assert.match(lead, /Excel/);
+  assert.match(lead, /more than half/);
+});
+

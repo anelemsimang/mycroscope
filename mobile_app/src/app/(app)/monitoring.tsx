@@ -253,7 +253,8 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
         <Text style={styles.hint}>
           Insights lets a manager write a report for a period: a week in review, workload, where time went, capacity,
           or how the period changed. The weekly note covers the previous full week. Reports are written inside
-          Mycroscope from figures already stored, and they name the people they describe. Pay figures are left out.
+          Mycroscope from figures already stored. If a figure is unusually high or low, that is the conclusion the report
+          leads with. The report names the people it describes. Pay figures are left out.
           Nothing is sent to another company. Employees are told in the notice while this is on.
         </Text>
         {!advisorAllowed ? (

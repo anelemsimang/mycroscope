@@ -407,8 +407,8 @@ function Advice({ from, to, team, scope }: { from: Ymd; to: Ymd; team: string | 
       <Card title="Write a report">
         <Text style={styles.hint}>
           The report is written inside Mycroscope from the figures already stored for {formatDay(from)} to {formatDay(to)}.
-          It names the people it describes. Pay figures are left out. Choose a period of at most 90 days.
-          Turn this on under Monitoring & privacy.
+          If a figure is unusually high or low, that is the conclusion the report leads with. It names the people it describes.
+          Pay figures are left out. Choose a period of at most 90 days. Turn this on under Monitoring & privacy.
         </Text>
         <Segmented options={REPORTS} value={template} onChange={setTemplate} />
         {err ? <ErrorBanner message={err} /> : null}
