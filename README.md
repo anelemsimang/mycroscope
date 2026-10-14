@@ -183,14 +183,15 @@ tracked computer time. From the migration below, productive totals can also incl
 `20261016090000_alerts_and_integrations.sql` (apply after the one above) adds:
 - **Alert rules** (Standard and up; manager app -> Alerts -> Alert rules): an alert when someone uses a website
   (the domain and its subdomains) or program you name. A rule can instead restrict a program or a website. Agent
-  2.6.2 minimises a restricted program when it comes to the front while monitoring is on, shows a short notice, and
+  2.6.3 minimises a restricted program when it comes to the front while monitoring is on, shows a short notice, and
   records an alert. No administrator rights are needed, and it starts only after the employee acknowledges the
   notice. A restricted website stays blocked in Google Chrome and Microsoft Edge the whole time the employee is
   signed in, including after hours and while tracking is paused, unless the computer already uses its own web proxy.
-  Other sites keep working. Suggested lists add file-sharing sites, personal email and Bluetooth file transfer
+  If the website is opened in Firefox or another browser, managers are told which website it was. Other sites keep
+  working. Suggested lists add file-sharing sites, personal email and Bluetooth file transfer
   (`fsquirt.exe`). Rules are checked on the server as activity arrives, so the alert works with every agent version,
   but only for what is recorded (Websites / Applications switched on). An alert shows a visit, not an upload.
-  Reinstall `Mycroscope-Setup.exe` (version 2.6.2) for minimising a program and for blocking a website.
+  Reinstall `Mycroscope-Setup.exe` (version 2.6.3) for minimising a program and for blocking a website.
 - **File activity** (Business and up; Monitoring & privacy -> File activity, off by default): with agent 2.3, USB
   drive, external disk and phone connections, and the names and sizes of files copied to removable drives, cloud
   sync folders (OneDrive, Dropbox, Google Drive) and, optionally, network drives. File contents are never read.
@@ -308,17 +309,20 @@ checkout is unchanged and moves a free company to Standard. The operator console
 The desktop app does not change for this.
 
 `20261023090000_restrictions.sql` (apply after `20261022090000_report_templates.sql`) lets an alert rule restrict a
-program or a website. A restricted program is minimised by agent 2.6.2, with a short notice, while monitoring is on.
+program or a website. A restricted program is minimised by agent 2.6.3, with a short notice, while monitoring is on.
 A restricted website stays blocked in Google Chrome and Microsoft Edge the whole time the employee is signed in,
-including after hours and while tracking is paused, unless the computer already uses its own web proxy. Other sites
-keep working. Saving or removing a restriction publishes a new notice, and it starts after the employee acknowledges
-it. Reinstall `Mycroscope-Setup.exe` (version 2.6.2).
+including after hours and while tracking is paused, unless the computer already uses its own web proxy. If the
+website is opened in Firefox or another browser, managers are told which website it was. Other sites keep working. Saving or removing a restriction publishes a new notice, and it starts after the employee acknowledges
+it. Reinstall `Mycroscope-Setup.exe` (version 2.6.3).
 
 `20261024090000_site_block.sql` (apply after the one above) updates the employee notice so a restricted website is
 described as blocked in Google Chrome and Microsoft Edge, instead of only raising an alert.
 
 `20261025090000_site_block_always.sql` (apply after the one above) keeps that block on outside working hours and
 while tracking is paused.
+
+`20261026090000_restricted_site_alert.sql` (apply after the one above) tells managers when a restricted website is
+opened in Firefox or another browser while the employee is signed in, including after hours and while tracking is paused.
 
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.

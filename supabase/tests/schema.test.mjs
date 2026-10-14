@@ -1488,8 +1488,21 @@ test('a restricted program is named in the notice, and a restricted website is r
   const named = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
   assert.match(named.notice_text, /facebook\.com/);
   assert.match(named.notice_text, /the whole time you are signed in/);
+  assert.match(named.notice_text, /another browser/);
   assert.doesNotMatch(named.notice_text, /facebook\.com \(working hours only\)/);
   assert.doesNotMatch(named.notice_text, /does not block the website/);
+  const opened = randomUUID();
+  await db.query(
+    `insert into agent_events (id, organization_id, employee_id, device_id, occurred_at, event_type, details)
+     values ($1, $2, $3, $4, now(), 'restricted_site', $5::jsonb)`,
+    [opened, ctx.orgId, ctx.empId, ctx.deviceId, JSON.stringify({ domain: 'facebook.com', browser: 'Firefox' })]);
+  const bypass = (await asUser(ctx.ownerAuth,
+    `select severity, details from get_integrity_alerts(now() - interval '1 hour') where kind = 'restricted_site'`)).rows;
+  assert.equal(bypass.length, 1);
+  assert.equal(bypass[0].severity, 'high');
+  assert.equal(bypass[0].details.domain, 'facebook.com');
+  assert.equal(bypass[0].details.browser, 'Firefox');
+  await db.query('delete from agent_events where id = $1', [opened]);
   await rejects(asUser(ctx.ownerAuth,
     `select save_alert_rule(null, 'Bad', 'app', 'nope.exe', 'low', false, true, 'block')`), /Alert or restrict/);
   await asUser(ctx.ownerAuth, 'select delete_alert_rule($1)', [steam.id]);

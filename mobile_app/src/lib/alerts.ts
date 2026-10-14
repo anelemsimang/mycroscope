@@ -48,6 +48,10 @@ export function describeAlert(a: Pick<IntegrityAlert, 'kind' | 'details'>): stri
       return `Mycroscope was uninstalled from ${d.hostname ? `the PC "${String(d.hostname)}"` : 'this PC'}. On company-managed PCs employees cannot do this; on personal PCs they can, and it is recorded here.`;
     case 'unattended_use':
       return `${d.hostname ? `The PC "${String(d.hostname)}"` : 'A PC'} was used for ${n(d.minutes)} minutes without Mycroscope tracking: nobody was signed in, or the monitoring notice was not accepted. It is listed under the last person who signed in on it; nothing about what it was used for is recorded.`;
+    case 'restricted_site': {
+      const where = d.browser ? String(d.browser) : 'another browser';
+      return `Opened ${String(d.domain ?? 'a restricted website')} in ${where} while signed in. Google Chrome and Microsoft Edge block this website.`;
+    }
     case 'policy_violation': {
       const matched = Array.isArray(d.matched) ? d.matched.map(String).filter(Boolean).join(', ') : '';
       const restricted = d.action === 'restrict';
@@ -85,6 +89,7 @@ export const ALERT_TITLES: Record<string, string> = {
   agent_uninstalled: 'App uninstalled',
   unattended_use: 'Used without signing in',
   policy_violation: 'Alert rule',
+  restricted_site: 'Restricted website opened',
   device_connected: 'Device connected',
   files_copied: 'Files copied',
   unapproved_ai: 'Unapproved AI tool',

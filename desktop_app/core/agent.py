@@ -22,7 +22,7 @@ from core.credentials import CredentialStore
 from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
 from core.restrict import Restrictor
-from core.siteblock import SiteBlock
+from core.siteblock import BypassWatch, SiteBlock, active_domains, activity_will_alert, matched_domain
 from core.files import FileActivityMonitor, FileSettings
 from core.location import PlaceTracker, classify, offices_from_settings, read_wifi_ssid
 from core.offline import REASONS, OfflinePrompt, ReturnTracker, clean_note
@@ -67,6 +67,7 @@ class Agent:
         self.places = PlaceTracker()
         self.restrictor = Restrictor()
         self.siteblock = SiteBlock()
+        self.blocked_sites = BypassWatch()
         self._offline_lock = threading.Lock()
         self._offline_queue: list[OfflinePrompt] = []
         self._engine_lock = threading.Lock()
@@ -485,6 +486,7 @@ class Agent:
                             monitoring=True, paused=False, in_work_hours=s.schedule.during_work_hours(now))
 
                 self.siteblock.apply(s.restrictions)
+                self._alert_if_blocked_site_opened(s, monitor, sample, now, block)
 
                 earliest = self.engine.session_started_at if self.engine else None
                 minutes = s.offline_prompt_minutes if isinstance(s.offline_prompt_minutes, int) else 10
@@ -529,6 +531,29 @@ class Agent:
         finally:
             monitor.close()
             self.siteblock.restore()
+
+    def _alert_if_blocked_site_opened(self, settings, monitor, sample, now, block) -> None:
+        """Tells managers when a restricted website is opened in a browser the block does not cover."""
+        if self.sync is None or not active_domains(settings.restrictions):
+            return
+        probe = sample
+        if not probe.domain and not probe.locked:
+            probe = monitor.sample(True, False, True)
+        pattern = matched_domain(settings.restrictions, probe.domain)
+        if pattern is None:
+            return
+        recording = block is None and not self.paused and settings.track_web_domains
+        if activity_will_alert(
+                settings.restrictions, probe.domain, recording=recording,
+                in_work_hours=settings.schedule.during_work_hours(now)):
+            return
+        if not self.blocked_sites.should_alert(pattern, now):
+            return
+        self.sync.record_event("restricted_site", {
+            "domain": probe.domain,
+            "browser": probe.app_name or probe.process_name,
+        }, at=now)
+        self.sync.poke()
 
     def _stop_tracker_thread(self) -> None:
         self._stop_tracking.set()

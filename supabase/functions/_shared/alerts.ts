@@ -24,6 +24,7 @@ export const ALERT_TITLES: Record<string, string> = {
   agent_uninstalled: 'App uninstalled',
   unattended_use: 'Used without signing in',
   policy_violation: 'Alert rule',
+  restricted_site: 'Restricted website opened',
   device_connected: 'Device connected',
   files_copied: 'Files copied',
   unapproved_ai: 'Unapproved AI tool',
@@ -82,6 +83,8 @@ export function describeAlert(a: Pick<ChannelAlert, 'kind' | 'details'>): string
       return `Mycroscope was uninstalled${d.hostname ? ` from "${str(d.hostname)}"` : ''}.`;
     case 'unattended_use':
       return `${d.hostname ? `"${str(d.hostname)}"` : 'A PC'} was used for ${num(d.minutes)} minutes without anyone signed in to Mycroscope.`;
+    case 'restricted_site':
+      return `Opened ${str(d.domain) || 'a restricted website'} in ${str(d.browser) || 'another browser'} while signed in. Google Chrome and Microsoft Edge block this website.`;
     case 'policy_violation': {
       const matched = Array.isArray(d.matched) ? d.matched.map(str).filter(Boolean).join(', ') : '';
       const what = d.action === 'restrict'

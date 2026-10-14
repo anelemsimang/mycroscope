@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.engine import TrackingSettings  # noqa: E402
 from core.restrict import Restrictor, matches_app, matches_domain, parse_restrictions  # noqa: E402
-from core.siteblock import SiteBlock, active_domains, proxy_is_free  # noqa: E402
+from core.siteblock import BypassWatch, SiteBlock, active_domains, activity_will_alert, matched_domain, proxy_is_free  # noqa: E402
 from core.schedule import Schedule  # noqa: E402
 
 
@@ -81,6 +81,16 @@ class RestrictTests(unittest.TestCase):
         self.assertTrue(proxy_is_free({"ProxyEnable": 0, "AutoConfigURL": ""}))
         hours = parse_restrictions([{"kind": "domain", "pattern": "facebook.com", "work_hours_only": True}])
         self.assertEqual(active_domains(hours), ("facebook.com",))
+        self.assertEqual(matched_domain(rules, "m.facebook.com"), "facebook.com")
+        self.assertIsNone(matched_domain(rules, "example.com"))
+        self.assertTrue(activity_will_alert(rules, "facebook.com", recording=True, in_work_hours=True))
+        self.assertFalse(activity_will_alert(rules, "facebook.com", recording=False, in_work_hours=True))
+        self.assertFalse(activity_will_alert(hours, "facebook.com", recording=True, in_work_hours=False))
+        watch = BypassWatch()
+        self.assertTrue(watch.should_alert("facebook.com", NOW))
+        self.assertFalse(watch.should_alert("facebook.com", NOW))
+        later = datetime(2026, 10, 14, 10, 11, tzinfo=timezone.utc)
+        self.assertTrue(watch.should_alert("facebook.com", later))
 
     def test_the_proxy_refuses_the_named_site_and_lets_another_through(self):
         gate = SiteBlock.__new__(SiteBlock)

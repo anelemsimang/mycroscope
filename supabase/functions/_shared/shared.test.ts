@@ -103,6 +103,8 @@ const ALERTS: ChannelAlert[] = [
 test('alert descriptions for channels never need file names', () => {
   assert.equal(describeAlert(ALERTS[0]), 'Betting: sports.bet.co.za for 10 min.');
   assert.equal(describeAlert(ALERTS[1]), '3 files (5.0 MB) copied to a USB drive or external disk ("KINGSTON").');
+  assert.equal(describeAlert({ kind: 'restricted_site', details: { domain: 'facebook.com', browser: 'Firefox' } }),
+    'Opened facebook.com in Firefox while signed in. Google Chrome and Microsoft Edge block this website.');
   assert.equal(describeAlert({ kind: 'device_connected', details: { destination: 'phone', label: 'Galaxy' } }),
     'A phone ("Galaxy") was connected to the PC.');
   assert.equal(formatBytes(512), '512 B');

@@ -10,6 +10,7 @@ import os
 import select
 import socket
 import threading
+from datetime import timedelta
 from typing import Optional
 
 from config import DATA_DIR
@@ -43,6 +44,40 @@ def proxy_is_free(current: dict) -> bool:
     except (TypeError, ValueError):
         enabled = 0
     return enabled != 1
+
+
+def matched_domain(rules: tuple[Restriction, ...], domain: Optional[str]) -> Optional[str]:
+    """The restricted website this address belongs to, if any."""
+    if not domain:
+        return None
+    for pattern in active_domains(rules):
+        if matches_domain(pattern, domain):
+            return pattern
+    return None
+
+
+def activity_will_alert(rules: tuple[Restriction, ...], domain: Optional[str], *, recording: bool, in_work_hours: bool) -> bool:
+    """True when the recorded activity will already tell managers about this website."""
+    if not recording or not domain:
+        return False
+    return any(
+        rule.kind == "domain" and matches_domain(rule.pattern, domain) and (not rule.work_hours_only or in_work_hours)
+        for rule in rules
+    )
+
+
+class BypassWatch:
+    """One manager alert per website, then not again for ten minutes."""
+
+    def __init__(self) -> None:
+        self._last: dict[str, object] = {}
+
+    def should_alert(self, pattern: str, now) -> bool:
+        previous = self._last.get(pattern)
+        if previous is not None and now - previous < timedelta(minutes=10):
+            return False
+        self._last[pattern] = now
+        return True
 
 
 def _blocked(host: str, patterns: tuple[str, ...]) -> bool:
