@@ -145,7 +145,21 @@ export interface Team { id: string; name: string }
 export interface TeamManager { team_id: string; employee_id: string }
 
 export type Category = 'productive' | 'neutral' | 'unproductive';
-export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category }
+export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category; team_id: string | null }
+
+/** Plan features (see plan_features in the database). */
+export type Feature = 'team_categories' | 'team_schedules' | 'goals';
+
+export interface WorkSchedule {
+  id: string;
+  team_id: string | null;
+  employee_id: string | null;
+  work_days: number[];
+  work_start: string;
+  work_end: string;
+}
+
+export interface Goal { id: string; team_id: string | null; productive_hours: number; under_percent: number; over_percent: number }
 export interface CategoryTotal { category: Category | 'uncategorised'; active_seconds: number; idle_seconds: number }
 
 export type DataRequestKind = 'access' | 'correction' | 'objection' | 'deletion' | 'other';
@@ -497,12 +511,13 @@ export const api = {
 
   // ---- productivity categories ------------------------------------------
   categoryRules: async () => {
-    const { data, error } = await supabase.from('app_categories').select('id,kind,pattern,category').order('pattern');
+    const { data, error } = await supabase.from('app_categories').select('id,kind,pattern,category,team_id').order('pattern');
     if (error) throw error;
     return (data ?? []) as CategoryRule[];
   },
-  setCategory: (kind: 'app' | 'domain', pattern: string, category: Category) =>
-    rpc<CategoryRule>('set_app_category', { p_kind: kind, p_pattern: pattern, p_category: category }),
+  /** team null = a rule for the whole company. */
+  setCategory: (kind: 'app' | 'domain', pattern: string, category: Category, team: string | null = null) =>
+    rpc<CategoryRule>('set_app_category', { p_kind: kind, p_pattern: pattern, p_category: category, p_team: team }),
   deleteCategory: (id: string) => rpc<void>('delete_app_category', { p_id: id }),
   categoryTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
     numeric(await rpc<CategoryTotal[]>('get_category_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
@@ -526,6 +541,38 @@ export const api = {
   // ---- agent install key -----------------------------------------------------
   installKey: () => rpc<string>('get_install_key'),
   rotateInstallKey: () => rpc<string>('rotate_install_key'),
+
+  // ---- plan features ---------------------------------------------------------
+  features: async () => (await rpc<Feature[] | null>('get_my_features')) ?? [],
+
+  // ---- working hours per team or person --------------------------------------
+  workSchedules: async () => {
+    const { data, error } = await supabase.from('work_schedules')
+      .select('id,team_id,employee_id,work_days,work_start,work_end');
+    if (error) throw error;
+    return (data ?? []) as WorkSchedule[];
+  },
+  /** Exactly one of team / employee. Returns the current notice (a new version when the hours are in force). */
+  saveWorkSchedule: (target: { team?: string; employee?: string }, days: number[], start: string, end: string) =>
+    rpc<Policy>('save_work_schedule', {
+      p_team: target.team ?? null, p_employee: target.employee ?? null, p_work_days: days, p_work_start: start, p_work_end: end,
+    }),
+  deleteWorkSchedule: (target: { team?: string; employee?: string }) =>
+    rpc<Policy>('delete_work_schedule', { p_team: target.team ?? null, p_employee: target.employee ?? null }),
+
+  // ---- productivity goals ----------------------------------------------------
+  goals: async () => {
+    const { data, error } = await supabase.from('productivity_goals')
+      .select('id,team_id,productive_hours,under_percent,over_percent');
+    if (error) throw error;
+    return numeric((data ?? []) as Goal[], ['productive_hours']);
+  },
+  /** team null = the company-wide goal. */
+  saveGoal: (team: string | null, productiveHours: number, underPercent: number, overPercent: number) =>
+    rpc<Goal>('save_goal', {
+      p_team: team, p_productive_hours: productiveHours, p_under_percent: underPercent, p_over_percent: overPercent,
+    }),
+  deleteGoal: (team: string | null) => rpc<void>('delete_goal', { p_team: team }),
 };
 
 /** Functions only platform operators (the SaaS provider, signed in with two-factor) may call. */

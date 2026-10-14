@@ -49,6 +49,22 @@ class ScheduleTests(unittest.TestCase):
         self.assertFalse(n.flag_after_hours_use)
         self.assertEqual(n.schedule.mode, "work_hours")
 
+    def test_own_hours_then_team_hours_then_company_hours(self):
+        snapshot = {**OFFICE, "schedules": [
+            {"team_id": "team-1", "employee_id": None, "work_days": [1, 2, 3, 4, 5, 6], "work_start": "06:00:00", "work_end": "14:00:00"},
+            {"team_id": None, "employee_id": "emp-1", "work_days": [1, 2, 3], "work_start": "09:00:00", "work_end": "13:00:00"},
+        ]}
+        tz = "Africa/Johannesburg"
+        own = Schedule.from_settings(snapshot, tz, "emp-1", "team-1")
+        self.assertEqual((own.work_days, own.work_start, own.work_end), ((1, 2, 3), time(9), time(13)))
+        team = Schedule.from_settings(snapshot, tz, "emp-2", "team-1")
+        self.assertEqual((team.work_days, team.work_start, team.work_end), ((1, 2, 3, 4, 5, 6), time(6), time(14)))
+        company = Schedule.from_settings(snapshot, tz, "emp-2", None)
+        self.assertEqual((company.work_start, company.work_end), (time(8), time(17)))
+        self.assertEqual(Schedule.from_settings({**OFFICE, "schedules": "bad"}, tz, "emp-1").work_start, time(8))
+        s = TrackingSettings.from_dict(snapshot, tz, "emp-2", "team-1")
+        self.assertTrue(s.schedule.is_work_time(datetime(2026, 10, 10, 5, 0, tzinfo=UTC)), "Saturday 07:00 for the team")
+
     def test_overlaps(self):
         s = Schedule.from_settings(OFFICE, "Africa/Johannesburg")
         night = datetime(2026, 10, 5, 18, 0, tzinfo=UTC)

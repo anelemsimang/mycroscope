@@ -46,10 +46,11 @@ class TrackingSettings:
     schedule: Schedule = field(default_factory=Schedule)
 
     @classmethod
-    def from_dict(cls, d: Optional[dict[str, Any]], timezone: str = "Africa/Johannesburg") -> "TrackingSettings":
+    def from_dict(cls, d: Optional[dict[str, Any]], timezone: str = "Africa/Johannesburg",
+                  employee_id: Optional[str] = None, team_id: Optional[str] = None) -> "TrackingSettings":
         d = d or {}
         known = {k: d[k] for k in cls.__dataclass_fields__ if k in d and d[k] is not None and k != "schedule"}
-        return cls(**known, schedule=Schedule.from_settings(d, timezone))
+        return cls(**known, schedule=Schedule.from_settings(d, timezone, employee_id, team_id))
 
     def narrowed_to(self, acknowledged: Optional["TrackingSettings"]) -> "TrackingSettings":
         """Records nothing the employee has not acknowledged; used while a new notice awaits acknowledgement.

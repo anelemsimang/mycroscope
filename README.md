@@ -41,7 +41,8 @@ npx expo start              # press w for the browser (http://localhost:8081), o
 - **Settings -> Compliance** (owners and managers): what is recorded, working hours, integrity checks, retention,
   Information Officer, notice text, who has acknowledged the notice, notice history, the audit log and
   employees' privacy requests.
-- **Settings -> Organisation:** alerts, productivity categories, teams (owner), subscription and billing,
+- **Settings -> Organisation:** alerts, productivity categories (company-wide or per team), productivity goals,
+  working hours for teams or individual people, teams (owner), subscription and billing,
   the agent install key (the key needed to install the desktop agent on a PC), and time-limited support
   access for Mycroscope (owner).
 - Owners can require two-factor login for all managers; new organisations get a 14-day trial.
@@ -151,6 +152,18 @@ Settings -> Organisation): whoever installs the agent must enter it, so an emplo
 on their own. It also adds two alerts: "Started late" (the agent only started well after the PC was switched on
 and used during working hours, e.g. the agent was removed, the PC restarted and used, then reinstalled) and
 "App uninstalled" (the uninstaller reported the removal). Both appear under Alerts and in the alert emails.
+
+`20261014090000_team_settings_and_goals.sql` adds:
+- **Plan features:** `plan_features(plan)` decides what each plan includes (trials get everything; goals need
+  Business or Enterprise). Change a customer's plan in the operator console.
+- **Productivity categories per team:** a team's rule beats the company rule for the same app or website.
+- **Working hours per team or person:** Settings -> Organisation -> Working hours. A person's own hours beat
+  their team's, which beat the company's. They are listed in the monitoring notice, so changes publish a new
+  version while monitoring is limited to working hours. Desktop agents older than this release ignore them and use
+  the company hours, so reinstall the agent with the new `Mycroscope-Setup.exe`.
+- **Productivity goals** per company or team, with under- and over-utilised thresholds.
+- **Daily usage** per person, app and website, filled nightly and back-filled for stored history, for
+  company-wide reports.
 
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.

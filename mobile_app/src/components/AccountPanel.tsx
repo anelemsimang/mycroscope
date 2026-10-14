@@ -50,8 +50,12 @@ export function AccountPanel() {
         <Card title="Organisation">
           <LinkRow title="Alerts" subtitle="Integrity checks and PCs not reporting during working hours"
             onPress={() => router.push('/alerts')} />
-          <LinkRow title="Productivity categories" subtitle="Mark apps and websites as productive or unproductive"
+          <LinkRow title="Productivity categories" subtitle="Mark apps and websites as productive or unproductive, per team if needed"
             onPress={() => router.push('/categories')} />
+          <LinkRow title="Productivity goals" subtitle="Expected productive hours per day, for the company or a team"
+            onPress={() => router.push('/goals')} />
+          <LinkRow title="Working hours" subtitle="Different hours for teams or individual people"
+            onPress={() => router.push('/work-hours')} />
           {profile.role === 'owner' ? (
             <LinkRow title="Teams" subtitle="Group employees and choose which managers see them"
               onPress={() => router.push('/teams')} />

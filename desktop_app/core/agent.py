@@ -213,7 +213,8 @@ class Agent:
     def _effective_settings(self, policy: dict[str, Any]) -> TrackingSettings:
         """The policy's settings, narrowed to what was last acknowledged until this version is acknowledged."""
         tz = self.profile.timezone if self.profile else "Africa/Johannesburg"
-        published = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(policy.get("settings") or {})}, tz)
+        who = (self.profile.employee_id if self.profile else None, policy.get("team_id"))
+        published = TrackingSettings.from_dict({**DEFAULT_SETTINGS, **(policy.get("settings") or {})}, tz, *who)
         if not self.profile:
             return published
         key = f"ack_settings:{self.profile.employee_id}"
@@ -227,7 +228,7 @@ class Agent:
                 self._cache(key, acknowledged)
         if acknowledged is None:
             return published.narrowed_to(None)
-        return published.narrowed_to(TrackingSettings.from_dict({**DEFAULT_SETTINGS, **acknowledged}, tz))
+        return published.narrowed_to(TrackingSettings.from_dict({**DEFAULT_SETTINGS, **acknowledged}, tz, *who))
 
     def _fetch_acknowledged_settings(self) -> Optional[dict[str, Any]]:
         """Settings of the notice this employee most recently acknowledged (on any device)."""

@@ -16,6 +16,18 @@ def _parse_time(value: Any, default: time) -> time:
         return default
 
 
+def _schedule_for(entries: Any, employee_id: Optional[str], team_id: Optional[str]) -> Optional[dict[str, Any]]:
+    if not isinstance(entries, list):
+        return None
+    valid = [e for e in entries if isinstance(e, dict)]
+    for key, wanted in (("employee_id", employee_id), ("team_id", team_id)):
+        if wanted:
+            match = next((e for e in valid if str(e.get(key) or "") == str(wanted)), None)
+            if match:
+                return match
+    return None
+
+
 @dataclass(frozen=True)
 class Schedule:
     mode: str = "always"                      # always | work_hours
@@ -26,8 +38,13 @@ class Schedule:
     also: Optional["Schedule"] = None         # while a new notice is unacknowledged: both must allow
 
     @classmethod
-    def from_settings(cls, d: Optional[dict[str, Any]], timezone: str) -> "Schedule":
+    def from_settings(cls, d: Optional[dict[str, Any]], timezone: str,
+                      employee_id: Optional[str] = None, team_id: Optional[str] = None) -> "Schedule":
+        """Hours from a policy snapshot: the person's own, else their team's, else the company's."""
         d = d or {}
+        own = _schedule_for(d.get("schedules"), employee_id, team_id)
+        if own:
+            d = {**d, **{k: own.get(k) for k in ("work_days", "work_start", "work_end")}}
         days = d.get("work_days")
         return cls(
             mode=d.get("tracking_schedule") or "always",

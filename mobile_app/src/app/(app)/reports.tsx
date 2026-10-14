@@ -31,6 +31,7 @@ export default function Reports() {
   const profile = useProfile();
   const [period, setPeriod] = useState<PeriodKey>('this_week');
   const [who, setWho] = useState<string>(ALL);
+  const [team, setTeam] = useState<string>(ALL);
   const [project, setProject] = useState<string>(ALL);
   const [exporting, setExporting] = useState<'csv' | 'pdf' | 'timesheet' | null>(null);
   const range = periodRange(period, todayIn(profile.timezone));
@@ -38,8 +39,10 @@ export default function Reports() {
 
   const employees = useAsync(async () => (await api.employees()).filter((e) => e.auth_user_id), []);
   const projects = useAsync(() => api.projects(), []);
+  const teams = useAsync(async () => (await api.teams()).teams, []);
   const projectName = projects.data?.find((p) => p.id === projectId)?.name;
-  const people = employees.data ?? [];
+  const teamName = teams.data?.find((t) => t.id === team)?.name;
+  const people = (employees.data ?? []).filter((e) => team === ALL || e.team_id === team);
   const selected = who === ALL ? people.filter((e) => e.is_active) : people.filter((e) => e.id === who);
   const selectedKey = selected.map((e) => e.id).join(',');
 
@@ -60,7 +63,7 @@ export default function Reports() {
     (t, l) => ({ active: t.active + l.active, idle: t.idle + l.idle, paused: t.paused + l.paused }),
     { active: 0, idle: 0, paused: 0 }), [data]);
   const single = who !== ALL ? data?.[0] : undefined;
-  const scopeName = single ? single.employee.name : 'Team';
+  const scopeName = single ? single.employee.name : teamName ?? 'Team';
   const title = `${scopeName} activity · ${PERIOD_LABELS[period]}${projectName ? ` · ${projectName}` : ''}`;
   const subtitle = (range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`)
     + (projectName ? ` · project ${projectName}` : '');
@@ -69,6 +72,7 @@ export default function Reports() {
     await Promise.all((data ?? []).map((l) =>
       api.logAccess(l.employee.id, 'exported_report', {
         from: range.from, to: range.to, format, scope: who === ALL ? 'team' : 'employee',
+        ...(teamName ? { team: teamName } : {}),
         ...(projectId ? { project: projectName ?? projectId } : {}),
       })));
   }
@@ -151,10 +155,18 @@ export default function Reports() {
 
   return (
     <Screen refreshing={refreshing} onRefresh={refresh}>
+      {(teams.data?.length ?? 0) > 0 ? (
+        <Card title="Select Team">
+          <Segmented value={team} onChange={(v) => { setTeam(v); setWho(ALL); }} options={[
+            { value: ALL, label: 'All teams' },
+            ...(teams.data ?? []).map((t) => ({ value: t.id, label: t.name })),
+          ]} />
+        </Card>
+      ) : null}
       <Card title="Select Employee">
         {employees.error ? <ErrorBanner message={employees.error} onRetry={employees.refresh} /> : null}
         <Segmented value={who} onChange={setWho} options={[
-          { value: ALL, label: 'All employees' },
+          { value: ALL, label: teamName ? `Everyone in ${teamName}` : 'All employees' },
           ...people.map((e) => ({ value: e.id, label: e.is_active ? e.name : `${e.name} (deactivated)` })),
         ]} />
       </Card>

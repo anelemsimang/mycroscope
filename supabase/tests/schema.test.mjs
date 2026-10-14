@@ -740,6 +740,149 @@ test('a PC used while nobody is signed in alerts managers, using only the per-PC
   await rejects(asUser(ctx.ownerAuth, 'select * from device_report_keys'), /permission denied/);
 });
 
+test('plans decide which features an organisation gets; trials get everything', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  const features = async () => (await asUser(ctx.ownerAuth, 'select get_my_features() as f')).rows[0].f;
+  await db.query(`update subscriptions set plan = 'trial' where organization_id = $1`, [ctx.orgId]);
+  assert.ok((await features()).includes('goals'));
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  assert.deepEqual(await features(), ['team_categories', 'team_schedules']);
+  await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)'), /not included in your plan/);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+  await rejects(asAnon('select get_my_features()'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, `select org_has_feature($1, 'goals')`, [ctx.orgId]), /permission denied/);
+});
+
+test('team category rules override company rules for that team only', async () => {
+  ctx.salesTeamId = (await asUser(ctx.ownerAuth, `select id from save_team(null, 'Sales')`)).rows[0].id;
+  await asUser(ctx.mgrAuth, `select set_app_category('domain', 'youtube.com', 'productive', $1)`, [ctx.teamId]);
+  await rejects(asUser(ctx.mgrAuth, `select set_app_category('domain', 'youtube.com', 'neutral', $1)`, [ctx.salesTeamId]),
+    /Not allowed/, 'a team manager cannot set rules for other teams');
+  const salesRule = (await asUser(ctx.ownerAuth,
+    `select id from set_app_category('app', 'Microsoft Excel', 'neutral', $1)`, [ctx.salesTeamId])).rows[0].id;
+  await rejects(asUser(ctx.mgrAuth, 'select delete_app_category($1)', [salesRule]), /Not allowed/);
+
+  const rules = await asUser(ctx.ownerAuth, `select team_id from app_categories where pattern = 'youtube.com' order by team_id nulls first`);
+  assert.deepEqual(rules.rows.map((r) => r.team_id), [null, ctx.teamId], 'company and team rules live side by side');
+
+  const cat = async (team, app, domain) =>
+    (await asUser(ctx.ownerAuth, 'select category_of($1, $2::uuid, $3, $4) as c', [ctx.orgId, team, app, domain])).rows[0].c;
+  assert.equal(await cat(ctx.teamId, 'Google Chrome', 'm.youtube.com'), 'productive');
+  assert.equal(await cat(null, 'Google Chrome', 'm.youtube.com'), 'unproductive');
+  assert.equal(await cat(ctx.salesTeamId, 'Google Chrome', 'm.youtube.com'), 'unproductive', 'Sales follows the company rule');
+  assert.equal(await cat(ctx.salesTeamId, 'Microsoft Excel', null), 'neutral');
+  assert.equal(await cat(ctx.teamId, 'Microsoft Excel', null), 'productive');
+
+  const device = randomUUID();
+  await db.query('insert into devices (id, organization_id, employee_id, hostname) values ($1, $2, $3, $4)',
+    [device, ctx.orgId, ctx.empId, 'LAPTOP-02']);
+  await db.query(
+    `insert into activity_segments (id, organization_id, employee_id, device_id, state, started_at, ended_at, app_name, domain, updated_at)
+     values ($1, $2, $3, $4, 'active', '2026-10-04T08:00:00Z', '2026-10-04T08:30:00Z', 'Google Chrome', 'youtube.com', '2026-10-04T08:30:00Z')`,
+    [randomUUID(), ctx.orgId, ctx.empId, device]);
+  const totals = await asUser(ctx.ownerAuth,
+    `select category, active_seconds::int from get_category_totals($1, '2026-10-04', '2026-10-04')`, [ctx.empId]);
+  assert.deepEqual(totals.rows, [{ category: 'productive', active_seconds: 1800 }], "the employee's team rule applies");
+});
+
+test('daily usage is filled nightly, scoped like activity, and removed with deleted activity', async () => {
+  await db.query(`select refresh_daily_usage($1, '2026-10-04')`, [ctx.orgId]);
+  const usage = await asUser(ctx.ownerAuth,
+    `select kind, name, active_seconds from daily_usage where employee_id = $1 and day = '2026-10-04' order by kind`, [ctx.empId]);
+  assert.deepEqual(usage.rows, [
+    { kind: 'app', name: 'Google Chrome', active_seconds: 1800 },
+    { kind: 'domain', name: 'youtube.com', active_seconds: 1800 },
+  ]);
+  const other = await asUser(ctx.otherOwnerAuth, 'select count(*)::int as n from daily_usage');
+  assert.equal(other.rows[0].n, 0, 'other organisations see nothing');
+  await rejects(asUser(ctx.ownerAuth, `delete from daily_usage`), /permission denied/);
+  await rejects(asAnon('select * from daily_usage'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, `select refresh_daily_usage($1, '2026-10-04')`, [ctx.orgId]), /permission denied/);
+
+  await asUser(ctx.ownerAuth, `select delete_activity($1, '2026-10-04T07:00:00Z', '2026-10-04T09:00:00Z', 'Test clean-up')`, [ctx.empId]);
+  const left = await db.query(`select count(*)::int as n from daily_usage where employee_id = $1 and day = '2026-10-04'`, [ctx.empId]);
+  assert.equal(left.rows[0].n, 0);
+});
+
+test('working hours per team or person: notice, policy snapshot and alerts', async () => {
+  await db.query(`update organization_settings set tracking_schedule = 'work_hours', work_days = '{1,2,3,4,5}',
+                  work_start = '08:00', work_end = '17:00' where organization_id = $1`, [ctx.orgId]);
+  const version = async () => (await asUser(ctx.ownerAuth, 'select max(version)::int as v from monitoring_policies')).rows[0].v;
+  const v0 = await version();
+
+  const saved = await asUser(ctx.mgrAuth, `select version from save_work_schedule($1, null, '{1,2,3,4,5,6}', '06:00', '14:00')`, [ctx.teamId]);
+  assert.equal(saved.rows[0].version, v0 + 1, 'new hours publish a new notice');
+  let status = (await asUser(ctx.empAuth, 'select notice_text, settings, team_id from get_my_policy_status()')).rows[0];
+  assert.match(status.notice_text,
+    /Different working hours apply to these teams: Dispatch: Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, 06:00 to 14:00\./);
+  assert.equal(status.team_id, ctx.teamId);
+  assert.deepEqual(status.settings.schedules, [
+    { team_id: ctx.teamId, employee_id: null, work_days: [1, 2, 3, 4, 5, 6], work_start: '06:00:00', work_end: '14:00:00' }]);
+
+  await rejects(asUser(ctx.mgrAuth, `select save_work_schedule($1, null, '{1}', '08:00', '12:00')`, [ctx.salesTeamId]), /Not allowed/);
+  await rejects(asUser(ctx.mgrAuth, `select save_work_schedule(null, $1, '{1}', '08:00', '12:00')`, [ctx.ownerId]), /Not allowed/);
+  await rejects(asUser(ctx.empAuth, `select save_work_schedule($1, null, '{1}', '08:00', '12:00')`, [ctx.teamId]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth, `select save_work_schedule($1, null, '{}', '08:00', '12:00')`, [ctx.teamId]), /at least one working day/);
+  await rejects(asUser(ctx.ownerAuth, `select save_work_schedule($1, null, '{1}', '08:00', '08:00')`, [ctx.teamId]), /different times/);
+  await rejects(asUser(ctx.ownerAuth, `select save_work_schedule($1, $2, '{1}', '08:00', '12:00')`, [ctx.teamId, ctx.empId]), /either a team or a person/);
+
+  await asUser(ctx.ownerAuth, `select save_work_schedule(null, $1, '{1,2,3}', '09:00', '13:00')`, [ctx.empId]);
+  status = (await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()')).rows[0];
+  assert.match(status.notice_text, /individual working hours agreed with them/);
+  assert.equal(status.settings.schedules.length, 2);
+  assert.equal((await asUser(ctx.empAuth, 'select count(*)::int as n from work_schedules')).rows[0].n, 0,
+    'employees read their hours from the notice snapshot, not the table');
+
+  const at = async (iso) => (await db.query('select is_employee_work_time($1, $2) as w', [ctx.empId, iso])).rows[0].w;
+  assert.equal(await at('2026-10-05T08:00:00Z'), true, 'Monday 10:00: individual hours');
+  assert.equal(await at('2026-10-05T11:30:00Z'), false, 'Monday 13:30: after individual hours');
+  assert.equal(await at('2026-10-08T08:00:00Z'), false, 'Thursday is not an individual work day');
+  await asUser(ctx.ownerAuth, 'select delete_work_schedule(null, $1)', [ctx.empId]);
+  assert.equal(await at('2026-10-10T05:00:00Z'), true, 'Saturday 07:00: team hours apply again');
+  assert.equal(await at('2026-10-05T13:00:00Z'), false, 'Monday 15:00: after team hours');
+  assert.equal((await db.query('select is_employee_work_time($1, $2) as w', [ctx.ownerId, '2026-10-05T13:00:00Z'])).rows[0].w,
+    true, 'people outside the team keep company hours');
+
+  const v1 = await version();
+  await asUser(ctx.ownerAuth, `select save_team($1, 'Dispatch & Courier')`, [ctx.teamId]);
+  assert.equal(await version(), v1 + 1, 'renaming a team with its own hours republishes the notice');
+  assert.match((await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0].notice_text, /Dispatch & Courier: Monday/);
+  await asUser(ctx.ownerAuth, `select save_team($1, 'Dispatch')`, [ctx.teamId]);
+
+  await db.query(`update organization_settings set tracking_schedule = 'always' where organization_id = $1`, [ctx.orgId]);
+  const v2 = await version();
+  await asUser(ctx.ownerAuth, `select save_work_schedule($1, null, '{1,2,3,4,5}', '07:00', '15:00')`, [ctx.teamId]);
+  assert.equal(await version(), v2, 'hours do not apply while monitoring runs whenever signed in, so no new notice');
+  await asUser(ctx.ownerAuth, 'select delete_work_schedule($1, null)', [ctx.teamId]);
+  await db.query(`update organization_settings set tracking_schedule = 'work_hours' where organization_id = $1`, [ctx.orgId]);
+  assert.equal((await asUser(ctx.empAuth, 'select settings from get_my_policy_status()')).rows[0].settings.schedules.length, 0);
+});
+
+test('productivity goals per company or team, limited to the right managers', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)');
+  await rejects(asUser(ctx.mgrAuth, 'select save_goal(null, 5, 80, 120)'), /Not allowed/, 'team managers cannot set the company goal');
+  await asUser(ctx.mgrAuth, 'select save_goal($1, 5.5, 70, 130)', [ctx.teamId]);
+  await rejects(asUser(ctx.mgrAuth, 'select save_goal($1, 5, 80, 120)', [ctx.salesTeamId]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 20, 80, 120)'), /between 0.5 and 16 hours/);
+  await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 100, 120)'), /under-utilised/);
+  await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 100)'), /over-utilised/);
+  await asUser(ctx.ownerAuth, 'select save_goal(null, 6.5, 80, 120)');
+  assert.equal((await asUser(ctx.ownerAuth, 'select count(*)::int as n from productivity_goals')).rows[0].n, 2, 'saving again updates');
+
+  const goal = async (auth) => (await asUser(auth, 'select productive_hours::float as h, team_id from goal_for_employee($1)', [ctx.empId])).rows;
+  assert.deepEqual(await goal(ctx.ownerAuth), [{ h: 5.5, team_id: ctx.teamId }], "the team's goal wins");
+  assert.deepEqual(await goal(ctx.empAuth), [], 'employees do not see goals');
+  assert.equal((await asUser(ctx.empAuth, 'select count(*)::int as n from productivity_goals')).rows[0].n, 0);
+  await asUser(ctx.mgrAuth, 'select delete_goal($1)', [ctx.teamId]);
+  assert.deepEqual(await goal(ctx.ownerAuth), [{ h: 6.5, team_id: null }], 'then the company goal applies');
+  await rejects(asUser(ctx.ownerAuth, 'update productivity_goals set productive_hours = 1'), /permission denied/);
+  const audit = await asUser(ctx.ownerAuth, `select count(*)::int as n from audit_log where action in ('goal_saved', 'goal_removed')`);
+  assert.equal(audit.rows[0].n, 4);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
 test('the sign-in reminder migration republishes every notice without changing settings', async () => {
   const before = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot from monitoring_policies order by version desc limit 1')).rows[0];
   await db.exec(readFileSync(path.join(migrationsDir, '20261010090000_notice_sign_in_reminders.sql'), 'utf8'));
