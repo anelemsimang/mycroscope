@@ -285,6 +285,13 @@ class AgentPolicyTests(unittest.TestCase):
         self.assertFalse(a._effective_settings(self.policy(False, ask_offline_reason=True)).ask_offline_reason)
         self.assertTrue(a._effective_settings(self.policy(True, ask_offline_reason=True)).ask_offline_reason)
 
+    def test_office_check_waits_until_the_notice_is_acknowledged(self):
+        a = self.agent
+        a._effective_settings(self.policy(True))
+        self.assertFalse(a._effective_settings(self.policy(False, track_work_location=True)).track_work_location)
+        self.assertTrue(a._effective_settings(self.policy(True, track_work_location=True)).track_work_location)
+        self.assertFalse(a._effective_settings(self.policy(False, track_work_location=False)).track_work_location)
+
     def test_narrowing_applies_immediately(self):
         a = self.agent
         a._effective_settings(self.policy(True))

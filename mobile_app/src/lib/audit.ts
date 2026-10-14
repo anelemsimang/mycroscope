@@ -30,6 +30,8 @@ const SETTING_LABELS: Record<string, string> = {
   ask_offline_reason: 'Ask about time away',
   offline_prompt_minutes: 'Ask after',
   productive_offline_reasons: 'Productive time away',
+  track_work_location: 'Office and remote days',
+  office_days_per_week: 'Office days per week',
 };
 
 function settingValue(key: string, value: unknown): string {
@@ -89,7 +91,7 @@ export function describeAudit(
     case 'activity_deleted':
       return {
         actor, title: `Deleted ${target}'s activity`,
-        detail: `${str(d.segments)} record(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}, ${range}. Reason: ${str(d.reason)}`,
+        detail: `${str(d.segments)} record(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}${d.work_location_days ? `, ${str(d.work_location_days)} office/remote day(s)` : ''}, ${range}. Reason: ${str(d.reason)}`,
       };
     case 'employee_deleted':
       return { actor, title: `Deleted employee ${str(d.name) || target}`, detail: `Reason: ${str(d.reason)}` };
@@ -119,7 +121,7 @@ export function describeAudit(
     case 'retention_purge':
       return {
         actor, title: 'Nightly clean-up deleted expired data',
-        detail: `${str(d.segments)} activity record(s), ${str(d.events)} event(s), ${str(d.sessions)} session(s), ${str(d.summaries)} daily total(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''} older than the retention period`,
+        detail: `${str(d.segments)} activity record(s), ${str(d.events)} event(s), ${str(d.sessions)} session(s), ${str(d.summaries)} daily total(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}${d.work_location_days ? `, ${str(d.work_location_days)} office/remote day(s)` : ''} older than the retention period`,
       };
     case 'payment_received':
       return { actor, title: 'Payment received', detail: `${str(d.seats)} seats × ${str(d.months)} month(s) · reference ${str(d.reference)}` };
@@ -134,6 +136,12 @@ export function describeAudit(
       };
     case 'case_study_ended':
       return { actor, title: 'Free case study ended', detail: `Trial until ${formatDateTime(str(d.trial_ends_at), timeZone)}` };
+    case 'office_saved':
+      return { actor, title: `Saved office ${str(d.name)}`, detail: '' };
+    case 'office_deleted':
+      return { actor, title: `Removed office ${str(d.name)}`, detail: '' };
+    case 'team_office_days':
+      return { actor, title: 'Set a team office-day target', detail: d.days == null ? 'Uses the company number' : `${str(d.days)} days a week` };
     default:
       return { actor, title: e.action.replace(/_/g, ' '), detail: '' };
   }

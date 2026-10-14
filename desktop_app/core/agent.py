@@ -22,6 +22,7 @@ from core.credentials import CredentialStore
 from core import integrity
 from core.engine import Identity, SegmentEngine, TrackingSettings
 from core.files import FileActivityMonitor, FileSettings
+from core.location import PlaceTracker, classify, offices_from_settings, read_wifi_ssid
 from core.offline import REASONS, OfflinePrompt, ReturnTracker, clean_note
 from core.store import LocalStore
 from core.sync import SyncService
@@ -61,6 +62,7 @@ class Agent:
         self.sync: Optional[SyncService] = None
         self.files: Optional[FileActivityMonitor] = None
         self.returns = ReturnTracker()
+        self.places = PlaceTracker()
         self._offline_lock = threading.Lock()
         self._offline_queue: list[OfflinePrompt] = []
         self._engine_lock = threading.Lock()
@@ -359,6 +361,7 @@ class Agent:
             on_device_registered=self._register_report_key,
         )
         self.returns.reset()
+        self.places.reset()
         with self._offline_lock:
             self._offline_queue.clear()
         self.engine = SegmentEngine(self.store, self.identity, self.settings, self._engine_event)
@@ -480,6 +483,8 @@ class Agent:
                     bool(s.ask_offline_reason) and block is None, earliest)
                 if prompt:
                     self._offer_offline(prompt)
+                if s.track_work_location and block is None and not self.paused:
+                    self._maybe_locate(now)
 
                 if self.files:
                     self.files.configure(
@@ -541,6 +546,7 @@ class Agent:
                 sess.update(ended_at=now, end_reason=end_reason)
                 self.store.save_session(sess)
         self.returns.reset()
+        self.places.reset()
         with self._offline_lock:
             self._offline_queue.clear()
         self.tracking = False
@@ -604,6 +610,37 @@ class Agent:
             "started_at": prompt.started_at, "ended_at": prompt.ended_at,
             "reason": reason, "note": clean_note(note),
         })
+
+    def _office_networks(self) -> list:
+        """Offices from the notice the employee has acknowledged, once this check is allowed."""
+        if not self.policy:
+            return []
+        settings = self.policy.get("settings") or {}
+        if not self.policy.get("acknowledged") and self.profile:
+            cached = self._cached(f"ack_settings:{self.profile.employee_id}")
+            if not isinstance(cached, dict):
+                return []
+            settings = cached
+        return offices_from_settings(settings)
+
+    def _maybe_locate(self, now: datetime) -> None:
+        if not self.places.due(now) or not self.profile:
+            return
+        self.places.mark_checked(now)
+        try:
+            office_id = classify(self.api.public_ip(), read_wifi_ssid(), self._office_networks())
+            if office_id is None:
+                return
+            day = now.astimezone(ZoneInfo(self.profile.timezone or "Africa/Johannesburg")).date()
+            sent = office_id or None
+            if not self.places.should_send(day, sent):
+                return
+            self.api.rpc("record_work_location", {"p_day": day.isoformat(), "p_office": sent})
+            self.places.remember(day, sent)
+        except (NetworkError, ApiError, AuthError) as exc:
+            log.info("Office check was not saved (%s)", exc.__class__.__name__)
+        except Exception:
+            log.info("Office check could not be read")
 
     def set_paused(self, paused: bool) -> None:
         if paused and not self.settings.allow_pause:

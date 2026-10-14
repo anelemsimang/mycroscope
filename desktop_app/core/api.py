@@ -232,6 +232,21 @@ class SupabaseApi:
         resp = self._rest("POST", f"/{table}", json=rows, headers={"Prefer": prefer})
         return resp.json() if returning else None
 
+    def public_ip(self) -> Optional[str]:
+        """This computer's public address, as the server sees it. Nothing is stored."""
+        try:
+            self.ensure_fresh_token()
+            resp = self._send("GET", "/functions/v1/client-ip", auth=True, timeout=4)
+        except NetworkError:
+            return None
+        if resp.status_code >= 400:
+            return None
+        try:
+            ip = resp.json().get("ip")
+        except ValueError:
+            return None
+        return ip if isinstance(ip, str) and ip else None
+
     def upsert(self, table: str, rows: list[dict[str, Any]], on_conflict: str, ignore_duplicates: bool = False) -> None:
         resolution = "ignore-duplicates" if ignore_duplicates else "merge-duplicates"
         self._rest("POST", f"/{table}", params={"on_conflict": on_conflict}, json=rows,

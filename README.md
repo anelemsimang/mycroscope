@@ -232,6 +232,30 @@ Where that time appears:
 Answers are kept for the same period as detailed activity and are removed when a manager deletes someone's activity.
 Two answers for the same person cannot overlap. The desktop app drops an answer the server refuses.
 
+`20261018090000_work_location.sql` (apply after the one above) adds **office and remote days** on Standard and up.
+With agent 2.5, while someone is signed in and working, the desktop app checks about every 15 minutes whether the PC
+is on a network the company registered: a public IP address or range (not a 192.168 or 10. address) and/or the office
+Wi-Fi name. It records each day as office, remote, or mixed, and which office. A home address and a home network name
+are not stored. Nothing is recorded until the employee has acknowledged the notice, and nothing is checked outside
+working hours, while paused, or while the subscription is inactive. If the address and the Wi-Fi name both cannot be
+read, that check is skipped. The Wi-Fi name comes from Windows (`netsh wlan show interfaces`). Some newer
+Windows 11 builds ask for location permission before they will show it; if that is refused, or there is no Wi-Fi, the
+app uses the public address only.
+
+Monitoring & privacy -> Office and remote turns it on, sets how many office days a week the company looks for (empty
+means no target), and registers offices. A team can set its own number under Teams; that replaces the company number
+for people in the team. Insights -> Office days shows the split and, for each full Monday-to-Sunday week in the period,
+whether the target was met. A mixed day counts as an office day. A week with no recorded day is left out.
+
+The public address is read by a small function that returns it and stores nothing. Deploy it with JWT verification left on:
+
+```powershell
+supabase functions deploy client-ip
+```
+
+Reinstall `Mycroscope-Setup.exe` for this. A VPN that exits through the office will look like the office. Two PCs on
+the same day are combined: one at the office and one elsewhere makes the day mixed.
+
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.
 

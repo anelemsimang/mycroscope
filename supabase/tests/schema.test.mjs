@@ -746,7 +746,7 @@ test('plans decide which features an organisation gets; trials get everything', 
   await db.query(`update subscriptions set plan = 'trial' where organization_id = $1`, [ctx.orgId]);
   assert.ok((await features()).includes('goals'));
   await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
-  assert.deepEqual(await features(), ['team_categories', 'team_schedules', 'trends', 'alert_rules', 'channels']);
+  assert.deepEqual(await features(), ['team_categories', 'team_schedules', 'trends', 'alert_rules', 'channels', 'work_location']);
   await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)'), /not included in your plan/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
   await rejects(asAnon('select get_my_features()'), /permission denied/);
@@ -1259,6 +1259,76 @@ test('time away from the computer: notice, answers, reports and deletion', async
   await save({ ask_offline_reason: false });
   const off = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
   assert.doesNotMatch(off.notice_text, /asks what you were doing/);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
+test('office and remote days: notice, one result per day, and the weekly target', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  const save = (settings) => asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)', [JSON.stringify(settings)]);
+
+  await rejects(asUser(ctx.mgrAuth,
+    `select save_office_network(null, 'Cape Town', array['41.13.0.0/24'], array['HQ'])`), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth,
+    `select save_office_network(null, 'Cape Town', array['192.168.0.0/24'], array[]::text[])`), /public IP/);
+  await rejects(asUser(ctx.ownerAuth,
+    `select save_office_network(null, 'Everywhere', array['0.0.0.0/0'], array[]::text[])`), /public IP/);
+  const office = (await asUser(ctx.ownerAuth,
+    `select id from save_office_network(null, 'Cape Town', array['41.13.0.0/24'], array['HQ Wi-Fi'])`)).rows[0].id;
+
+  await save({ track_work_location: true, office_days_per_week: 3 });
+  const notice = (await asUser(ctx.empAuth, 'select notice_text, settings from get_my_policy_status()')).rows[0];
+  assert.match(notice.notice_text, /home network are not stored/);
+  assert.match(notice.notice_text, /Cape Town/);
+  assert.match(notice.notice_text, /3 office days/);
+  assert.equal(notice.settings.track_work_location, true);
+  assert.equal(notice.settings.office_networks[0].wifi_names[0], 'HQ Wi-Fi');
+
+  const today = `(now() at time zone 'Africa/Johannesburg')::date`;
+  await rejects(asUser(ctx.empAuth,
+    `select record_work_location(${today}, '00000000-0000-0000-0000-000000000000')`), /Unknown office/);
+  assert.equal((await asUser(ctx.empAuth, `select record_work_location(${today}, null) as l`)).rows[0].l, 'remote');
+  assert.equal((await asUser(ctx.empAuth, `select record_work_location(${today}, $1) as l`, [office])).rows[0].l, 'mixed');
+  await rejects(asUser(ctx.empAuth, 'select * from work_location_days'), /permission denied/);
+  await rejects(asAnon(`select record_work_location(${today}, null)`), /permission denied/);
+
+  const mine = (await asUser(ctx.empAuth,
+    `select location, office_name from get_work_locations($1, ${today}, ${today})`, [ctx.empId])).rows[0];
+  assert.equal(mine.location, 'mixed');
+  assert.equal(mine.office_name, 'Cape Town');
+  await rejects(asUser(ctx.otherOwnerAuth,
+    `select * from get_work_locations($1, ${today}, ${today})`, [ctx.empId]), /Not allowed/);
+
+  await db.query(`insert into work_location_days
+      (organization_id, employee_id, day, saw_office, saw_remote, office_id, location) values
+      ($1, $2, '2026-10-05', true, false, $3, 'office'),
+      ($1, $2, '2026-10-06', true, false, $3, 'office'),
+      ($1, $2, '2026-10-07', true, false, $3, 'office')`, [ctx.orgId, ctx.empId, office]);
+  const week = (await asUser(ctx.ownerAuth, `select office_days, remote_days, target_per_week, weeks_judged, weeks_met
+      from get_office_adherence('2026-10-05', '2026-10-11', null) where employee_id = $1`, [ctx.empId])).rows[0];
+  assert.equal(Number(week.office_days), 3);
+  assert.equal(Number(week.remote_days), 0);
+  assert.equal(Number(week.target_per_week), 3);
+  assert.equal(Number(week.weeks_judged), 1);
+  assert.equal(Number(week.weeks_met), 1);
+
+  await asUser(ctx.ownerAuth, 'select set_team_office_days($1, 4)', [ctx.teamId]);
+  const teamTarget = (await asUser(ctx.ownerAuth, `select target_per_week from get_office_adherence('2026-10-05', '2026-10-11', null)
+      where employee_id = $1`, [ctx.empId])).rows[0];
+  assert.equal(Number(teamTarget.target_per_week), 4);
+  await rejects(asUser(ctx.mgrAuth, 'select set_team_office_days($1, 2)', [ctx.salesTeamId]), /Not allowed/);
+
+  await asUser(ctx.ownerAuth, `select delete_activity($1, now() - interval '3 hours', now(), 'test')`, [ctx.empId]);
+  const leftToday = (await db.query(`select count(*)::int as n from work_location_days
+      where employee_id = $1 and day = (now() at time zone 'Africa/Johannesburg')::date`, [ctx.empId])).rows[0];
+  assert.equal(Number(leftToday.n), 0);
+
+  await db.query('delete from work_location_days where employee_id = $1', [ctx.empId]);
+  await asUser(ctx.ownerAuth, 'select set_team_office_days($1, null)', [ctx.teamId]);
+  await asUser(ctx.ownerAuth, 'select delete_office_network($1)', [office]);
+  await save({ track_work_location: false, office_days_per_week: null });
+  const quiet = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.doesNotMatch(quiet.notice_text, /home network are not stored/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 

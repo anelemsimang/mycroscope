@@ -126,6 +126,9 @@ export interface ComplianceSettings {
   offline_prompt_minutes: number;
   /** Which answers are added to productive time. Applied to past days as well. */
   productive_offline_reasons: OfflineReason[];
+  track_work_location: boolean;
+  /** Null when the company has not set a weekly office-day target. */
+  office_days_per_week: number | null;
   require_mfa: boolean;
   information_officer_name: string | null;
   information_officer_email: string | null;
@@ -135,7 +138,8 @@ export interface ComplianceSettings {
 const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track_full_urls,idle_threshold_seconds,' +
   'allow_pause,retention_days,summary_retention_days,notice_custom_text,tracking_schedule,work_days,work_start,' +
   'work_end,flag_after_hours_use,detect_tampering,detect_removable_media,detect_cloud_sync,detect_network_drives,' +
-  'file_retention_days,ask_offline_reason,offline_prompt_minutes,productive_offline_reasons,require_mfa,updated_at';
+  'file_retention_days,ask_offline_reason,offline_prompt_minutes,productive_offline_reasons,' +
+  'track_work_location,office_days_per_week,require_mfa,updated_at';
 
 export type ServiceLevel = 'full' | 'read_only';
 export interface ServiceStatus {
@@ -157,7 +161,15 @@ export function inCaseStudy(s: { status: string | null; case_study_until: string
   return s.status === 'trialing' && !!s.case_study_until && Date.parse(s.case_study_until) > now;
 }
 
-export interface Team { id: string; name: string }
+export interface Team { id: string; name: string; office_days_per_week: number | null }
+
+export interface OfficeNetwork { id: string; name: string; cidrs: string[]; wifi_names: string[] }
+export interface WorkLocationDay { day: Ymd; location: 'office' | 'remote' | 'mixed'; office_name: string | null }
+export interface OfficeAdherence {
+  employee_id: string; name: string; team_name: string | null;
+  office_days: number; remote_days: number; mixed_days: number;
+  target_per_week: number | null; weeks_judged: number; weeks_met: number | null;
+}
 export interface TeamManager { team_id: string; employee_id: string }
 
 export type Category = 'productive' | 'neutral' | 'unproductive';
@@ -165,7 +177,7 @@ export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: str
 
 /** Plan features (see plan_features in the database). */
 export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage'
-  | 'alert_rules' | 'channels' | 'file_activity' | 'api';
+  | 'alert_rules' | 'channels' | 'file_activity' | 'api' | 'work_location';
 
 export type Severity = 'low' | 'medium' | 'high';
 export interface AlertRule {
@@ -616,7 +628,7 @@ export const api = {
   // ---- teams -------------------------------------------------------------
   teams: async () => {
     const [teams, managers] = await Promise.all([
-      supabase.from('teams').select('id,name').order('name'),
+      supabase.from('teams').select('id,name,office_days_per_week').order('name'),
       supabase.from('team_managers').select('team_id,employee_id'),
     ]);
     if (teams.error) throw teams.error;
@@ -624,6 +636,23 @@ export const api = {
     return { teams: (teams.data ?? []) as Team[], managers: (managers.data ?? []) as TeamManager[] };
   },
   saveTeam: (id: string | null, name: string) => rpc<Team>('save_team', { p_team: id, p_name: name }),
+  setTeamOfficeDays: (team: string, days: number | null) =>
+    rpc<void>('set_team_office_days', { p_team: team, p_days: days }),
+  officeNetworks: async () => {
+    const { data, error } = await supabase.from('office_networks').select('id,name,cidrs,wifi_names').order('name');
+    if (error) throw error;
+    return (data ?? []) as OfficeNetwork[];
+  },
+  saveOfficeNetwork: (name: string, cidrs: string[], wifi: string[]) =>
+    rpc<OfficeNetwork>('save_office_network', { p_id: null, p_name: name, p_cidrs: cidrs, p_wifi: wifi }),
+  deleteOfficeNetwork: (id: string) => rpc<void>('delete_office_network', { p_id: id }),
+  workLocations: (employee: string, from: Ymd, to: Ymd) =>
+    rpc<WorkLocationDay[]>('get_work_locations', { p_employee: employee, p_from: from, p_to: to }),
+  officeAdherence: async (from: Ymd, to: Ymd, team?: string | null) =>
+    nullableNumeric(
+      numeric(await rpc<OfficeAdherence[]>('get_office_adherence', { p_from: from, p_to: to, p_team: team ?? null }),
+        ['office_days', 'remote_days', 'mixed_days', 'weeks_judged']),
+      ['target_per_week', 'weeks_met']),
   deleteTeam: (id: string) => rpc<void>('delete_team', { p_team: id }),
   setEmployeeTeam: (employee: string, team: string | null) => rpc<void>('set_employee_team', { p_employee: employee, p_team: team }),
   setTeamManagers: (team: string, managers: string[]) => rpc<void>('set_team_managers', { p_team: team, p_managers: managers }),

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import {
   quote, safeReturnUrl, signTerms, termsFromTransaction, verifyPaystackSignature, verifyTerms,
 } from './billing.ts';
+import { clientAddress, isPublicAddress } from './ip.ts';
 import { renderAlert, renderDigest } from './email.ts';
 import {
   type ChannelAlert, deliver, describeAlert, formatBytes, signWebhook, slackMessage, teamsMessage, webhookBody,
@@ -13,6 +14,16 @@ import {
 import { createServer } from 'node:http';
 
 const SECRET = 'sk_test_example';
+
+test('the public address ignores private and proxy-only hops', () => {
+  assert.equal(isPublicAddress('8.8.8.8'), true);
+  assert.equal(isPublicAddress('192.168.0.1'), false);
+  assert.equal(isPublicAddress('10.1.2.3'), false);
+  assert.equal(isPublicAddress('127.0.0.1'), false);
+  const headers = new Headers({ 'x-forwarded-for': '10.0.0.4, 41.13.0.8', 'x-real-ip': '192.168.1.1' });
+  assert.equal(clientAddress(headers), '41.13.0.8');
+  assert.equal(clientAddress(new Headers({ 'x-forwarded-for': '10.0.0.4' })), null);
+});
 
 test('prepaid quotes', () => {
   assert.equal(quote(30, 1, 9900).amount_cents, 297000);

@@ -3,11 +3,12 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import {
-  Button, Card, ErrorBanner, Field, Loading, Screen, Segmented, ToggleRow, colors, styles,
+  Button, Card, Empty, ErrorBanner, Field, Loading, Screen, Segmented, ToggleRow, colors, styles,
 } from '@/components/ui';
-import { api, errorMessage, type ComplianceSettings, type OfflineReason } from '@/lib/api';
+import { api, errorMessage, type ComplianceSettings, type OfficeNetwork, type OfflineReason } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDateTime } from '@/lib/format';
+import { manageableTeams } from '@/lib/scope';
 import { useProfile, useSession } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
@@ -28,21 +29,26 @@ const OFFLINE_REASONS: { id: OfflineReason; label: string; hint: string }[] = [
 export default function Monitoring() {
   const profile = useProfile();
   const { data, error, loading, refresh } = useAsync(async () => {
-    const [settings, policies, features] = await Promise.all([
-      api.complianceSettings(profile.organizationId), api.policies(), api.features(),
+    const [settings, policies, features, { teams, managers }] = await Promise.all([
+      api.complianceSettings(profile.organizationId), api.policies(), api.features(), api.teams(),
     ]);
-    return { settings, current: policies[0] ?? null, fileActivity: features.includes('file_activity') };
+    return {
+      settings, current: policies[0] ?? null,
+      fileActivity: features.includes('file_activity'),
+      workLocation: features.includes('work_location'),
+      orgWide: manageableTeams(teams, managers, profile).orgWide,
+    };
   }, [profile.organizationId]);
 
   if (loading && !data) return <Loading />;
   if (!data) return <Screen><ErrorBanner message={error ?? 'Could not load settings.'} onRetry={refresh} /></Screen>;
   return <MonitoringForm key={data.settings.updated_at} initial={data.settings} current={data.current}
-    fileActivityAllowed={data.fileActivity} onSaved={refresh} />;
+    fileActivityAllowed={data.fileActivity} workLocationAllowed={data.workLocation} orgWide={data.orgWide} onSaved={refresh} />;
 }
 
-function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
+function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAllowed, orgWide, onSaved }: {
   initial: ComplianceSettings; current: { version: number; notice_text: string; published_at: string } | null;
-  fileActivityAllowed: boolean; onSaved: () => void;
+  fileActivityAllowed: boolean; workLocationAllowed: boolean; orgWide: boolean; onSaved: () => void;
 }) {
   const profile = useProfile();
   const { aal, reloadService } = useSession();
@@ -55,6 +61,7 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
   const [summaryRetention, setSummaryRetention] = useState(String(initial.summary_retention_days));
   const [fileRetention, setFileRetention] = useState(String(initial.file_retention_days));
   const [offlineMinutes, setOfflineMinutes] = useState(String(initial.offline_prompt_minutes));
+  const [officeDays, setOfficeDays] = useState(initial.office_days_per_week == null ? '' : String(initial.office_days_per_week));
   const [showNotice, setShowNotice] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +91,10 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
     if (!Number.isInteger(askedAfter) || askedAfter < 1 || askedAfter > 120) {
       return setError('Ask after a whole number of minutes from 1 to 120.');
     }
+    const officeTarget = officeDays.trim() === '' ? null : Number(officeDays.trim());
+    if (officeTarget !== null && (!Number.isInteger(officeTarget) || officeTarget < 1 || officeTarget > 7)) {
+      return setError('Office days per week must be a whole number from 1 to 7, or empty when there is no target.');
+    }
     if ((draft.notice_custom_text ?? '').length > 4000) return setError('The message to employees is limited to 4000 characters.');
     if (draft.tracking_schedule === 'work_hours') {
       if (draft.work_days.length === 0) return setError('Choose at least one working day.');
@@ -97,6 +108,7 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
       ...draft, retention_days: detail, summary_retention_days: summary, file_retention_days: files,
       offline_prompt_minutes: askedAfter,
       productive_offline_reasons: OFFLINE_REASONS.map((r) => r.id).filter((id) => draft.productive_offline_reasons.includes(id)),
+      office_days_per_week: officeTarget,
     };
 
     const initialDraft: Draft = { ...initial, work_start: hhmm(initial.work_start), work_end: hhmm(initial.work_end) };
@@ -194,6 +206,26 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
               : draft.productive_offline_reasons.filter((x) => x !== r.id))}
             hint={r.hint} />
         ))}
+      </Card>
+
+      <Card title="Office and remote">
+        <Text style={styles.hint}>
+          The desktop app checks whether the PC is on a network you register here (the office's public internet address
+          or its Wi-Fi name) and records each day as office, remote, or mixed. A home address and a home network name
+          are not stored. The check starts only after the employee has acknowledged the notice.
+        </Text>
+        {!workLocationAllowed ? (
+          <Text style={[styles.hint, { color: colors.danger }]}>
+            Office and remote days are not included in your plan. Contact Mycroscope to upgrade.
+          </Text>
+        ) : null}
+        <ToggleRow label="Record office and remote days" value={draft.track_work_location}
+          disabled={!workLocationAllowed && !draft.track_work_location}
+          onChange={(v) => set('track_work_location', v)}
+          hint="Included from the Standard plan. Reinstall the desktop app (version 2.5 or later) on each PC." />
+        <Field label="Office days per week" value={officeDays} onChangeText={setOfficeDays}
+          keyboardType="number-pad" hint="1 to 7, or leave empty when the company has no target. A team can set its own number under Teams. A day counts when someone was in an office for part of it." />
+        <OfficeList orgWide={orgWide} allowed={workLocationAllowed} />
       </Card>
 
       <Card title="When monitoring happens">
@@ -311,5 +343,77 @@ function MonitoringForm({ initial, current, fileActivityAllowed, onSaved }: {
         </Card>
       ) : null}
     </Screen>
+  );
+}
+
+function OfficeList({ orgWide, allowed }: { orgWide: boolean; allowed: boolean }) {
+  const { data, error, loading, refresh, reload } = useAsync(() => api.officeNetworks(), []);
+  const [name, setName] = useState('');
+  const [address, setAddress] = useState('');
+  const [wifi, setWifi] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  async function add() {
+    setFormError(null);
+    if (!name.trim()) return setFormError('Give the office a name.');
+    const cidrs = address.split(',').map((s) => s.trim()).filter(Boolean);
+    const names = wifi.split(',').map((s) => s.trim()).filter(Boolean);
+    if (cidrs.length === 0 && names.length === 0) return setFormError('Add the public IP address or the Wi-Fi name.');
+    setBusy(true);
+    try {
+      await api.saveOfficeNetwork(name.trim(), cidrs, names);
+      setName(''); setAddress(''); setWifi('');
+      reload();
+    } catch (e) {
+      setFormError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(office: OfficeNetwork) {
+    if (!await confirmAction(`Remove ${office.name}?`, 'Past days stay recorded. New checks will no longer match this office.', 'Remove')) return;
+    setBusy(true);
+    try {
+      await api.deleteOfficeNetwork(office.id);
+      reload();
+    } catch (e) {
+      setFormError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View style={{ gap: 8, marginTop: 8 }}>
+      <Text style={styles.label}>Registered offices</Text>
+      {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
+      {formError ? <ErrorBanner message={formError} /> : null}
+      {loading && !data ? <Loading /> : null}
+      {data && data.length === 0 ? <Empty text="No offices yet." /> : null}
+      {data?.map((office) => (
+        <View key={office.id} style={[styles.row, { justifyContent: 'space-between' }]}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.rowText}>{office.name}</Text>
+            <Text style={styles.hint}>
+              {[...office.cidrs, ...office.wifi_names].join(' · ') || 'No address'}
+            </Text>
+          </View>
+          {orgWide ? <Text style={{ color: colors.danger, fontWeight: '600' }} onPress={() => remove(office)}>Remove</Text> : null}
+        </View>
+      ))}
+      {orgWide && allowed ? (
+        <>
+          <Field label="Office name" value={name} onChangeText={setName} placeholder="Cape Town" />
+          <Field label="Public IP address or range" value={address} onChangeText={setAddress}
+            autoCapitalize="none" placeholder="41.0.0.1 or 41.0.0.0/24" hint="The address the internet sees, not a 192.168 or 10. address." />
+          <Field label="Office Wi-Fi name (optional)" value={wifi} onChangeText={setWifi} autoCapitalize="none" />
+          <Button small title="Add office" loading={busy} onPress={add} />
+        </>
+      ) : (
+        <Text style={styles.hint}>Only a company-wide manager can add or remove offices.</Text>
+      )}
+    </View>
   );
 }

@@ -6,7 +6,7 @@ import {
   BarRow, Button, Card, Empty, ErrorBanner, Field, InnerTabs, Loading, Screen, Segmented, StackedBar, StatGrid, colors, styles,
 } from '@/components/ui';
 import {
-  api, errorMessage, type CapacityRow, type Feature, type Granularity, type SoftwareUsage, type TrendPoint, type WorkloadRow,
+  api, errorMessage, type CapacityRow, type Feature, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
   type WorkloadStatus,
 } from '@/lib/api';
 import { confirmAction } from '@/lib/dialog';
@@ -17,7 +17,7 @@ import { manageableTeams } from '@/lib/scope';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
-type Tab = 'trends' | 'workload' | 'capacity' | 'software';
+type Tab = 'trends' | 'workload' | 'capacity' | 'software' | 'where';
 type Period = 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_30' | 'last_90' | 'last_365';
 
 const ALL = '__all__';
@@ -31,10 +31,10 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: 'last_365', label: 'Last 12 months' },
 ];
 const TAB_FEATURE: Record<Tab, Feature> = {
-  trends: 'trends', workload: 'workload', capacity: 'workload', software: 'software_usage',
+  trends: 'trends', workload: 'workload', capacity: 'workload', software: 'software_usage', where: 'work_location',
 };
 const TAB_LABEL: Record<Tab, string> = {
-  trends: 'Trends', workload: 'Workload', capacity: 'Capacity', software: 'Software',
+  trends: 'Trends', workload: 'Workload', capacity: 'Capacity', software: 'Software', where: 'Office days',
 };
 
 /** The "last N days" periods end yesterday so a half-finished day doesn't drag the averages down. */
@@ -106,6 +106,7 @@ export default function Insights() {
       {current === 'workload' ? <Workload from={range.from} to={range.to} team={teamId} /> : null}
       {current === 'capacity' ? <Capacity from={range.from} to={range.to} orgWide={scope.orgWide} teams={scope.teams} /> : null}
       {current === 'software' ? <Software from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
+      {current === 'where' ? <Where from={range.from} to={range.to} team={teamId} /> : null}
     </Screen>
   );
 }
@@ -218,6 +219,51 @@ function Trends({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
         ) : null}
       </Card>
     </>
+  );
+}
+
+// ---- Office days ---------------------------------------------------------------
+
+function Where({ from, to, team }: { from: Ymd; to: Ymd; team: string | null }) {
+  const { data, error, loading, refresh } = useAsync(() => api.officeAdherence(from, to, team), [from, to, team]);
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+  if (loading && !data) return <Loading />;
+  if (!data) return null;
+  const judged = data.filter((r) => r.target_per_week !== null && r.weeks_judged > 0);
+  const met = judged.filter((r) => (r.weeks_met ?? 0) >= r.weeks_judged).length;
+  return (
+    <>
+      <StatGrid items={[
+        { label: 'People', value: String(data.length) },
+        { label: 'Weeks on target', value: judged.length ? `${met} of ${judged.length}` : '–' },
+      ]} />
+      <Card title="Where people worked">
+        <Text style={styles.hint}>
+          Each day is office, remote, or mixed. A mixed day counts as an office day. Only a full Monday-to-Sunday week
+          inside this period is compared with the weekly target, and a week with no recorded day is left out, for example
+          when someone was on leave. The desktop app stores the result only, not a home address or a home network name.
+        </Text>
+        {data.length === 0 ? <Empty text="No one to show." /> : null}
+        {data.map((r) => <WhereRow key={r.employee_id} row={r} />)}
+      </Card>
+    </>
+  );
+}
+
+function WhereRow({ row }: { row: OfficeAdherence }) {
+  const target = row.target_per_week === null
+    ? 'No weekly target'
+    : row.weeks_judged === 0
+      ? `Target ${row.target_per_week} a week · no full week to judge`
+      : `${row.weeks_met} of ${row.weeks_judged} weeks at the target of ${row.target_per_week}`;
+  return (
+    <View style={{ paddingVertical: 6 }}>
+      <Text style={styles.rowText}>{row.name}{row.team_name ? ` · ${row.team_name}` : ''}</Text>
+      <Text style={styles.hint}>
+        {row.office_days} office {row.office_days === 1 ? 'day' : 'days'}
+        {row.mixed_days > 0 ? ` (${row.mixed_days} mixed)` : ''} · {row.remote_days} remote · {target}
+      </Text>
+    </View>
   );
 }
 

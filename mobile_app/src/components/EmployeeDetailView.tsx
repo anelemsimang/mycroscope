@@ -9,7 +9,7 @@ import {
   StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
 import { DESTINATIONS, formatBytes } from '@/lib/alerts';
-import { api, errorMessage, type EmployeeRow, type FileEvent, type OfflineEntry } from '@/lib/api';
+import { api, errorMessage, type EmployeeRow, type FileEvent, type OfflineEntry, type WorkLocationDay } from '@/lib/api';
 import { notify } from '@/lib/dialog';
 import { shareCsv } from '@/lib/export';
 import {
@@ -342,8 +342,37 @@ function History({ id, name, timezone, today, isSelf }: { id: string; name: stri
       ) : null}
       <Button title="Export daily summaries (CSV)" variant="secondary" onPress={exportCsv} loading={exporting} disabled={!data} />
       <OfflineAnswers id={id} timezone={timezone} from={dayStartUtc(from, timezone)} to={dayStartUtc(addDays(today, 1), timezone)} />
+      <WorkPlaces id={id} from={from} to={today} />
       <FileActivity id={id} timezone={timezone} isSelf={isSelf} />
     </>
+  );
+}
+
+const PLACE_LABEL = { office: 'Office', remote: 'Remote', mixed: 'Mixed' } as const;
+
+function WorkPlaces({ id, from, to }: { id: string; from: string; to: string }) {
+  const { data, error, loading, refresh } = useAsync(() => api.workLocations(id, from, to), [id, from, to]);
+  return (
+    <Card title="Office and remote">
+      {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
+      {loading && !data ? <Loading /> : null}
+      {data && data.length === 0 ? (
+        <Empty text="No office or remote days in the last 30 days. This is recorded only when the company has switched it on." />
+      ) : null}
+      {data?.map((row) => <PlaceRow key={row.day} row={row} />)}
+      <Text style={styles.hint}>
+        A day is mixed when the computer was on an office network and somewhere else. The home address and home network name are not stored.
+      </Text>
+    </Card>
+  );
+}
+
+function PlaceRow({ row }: { row: WorkLocationDay }) {
+  return (
+    <View style={[styles.row, { justifyContent: 'space-between', paddingVertical: 4 }]}>
+      <Text style={styles.rowText}>{formatDay(row.day, { weekday: true })}</Text>
+      <Text style={styles.hint}>{PLACE_LABEL[row.location]}{row.office_name ? ` · ${row.office_name}` : ''}</Text>
+    </View>
   );
 }
 

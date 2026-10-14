@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button, Card, Empty, ErrorBanner, Field, Loading, Screen, ToggleRow, styles } from '@/components/ui';
-import { api, errorMessage, type Team, type TeamRow } from '@/lib/api';
+import { api, errorMessage, type Feature, type Team, type TeamRow } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -10,8 +10,8 @@ import { useAsync } from '@/lib/useAsync';
 export default function Teams() {
   const profile = useProfile();
   const { data, error, loading, refresh, reload } = useAsync(async () => {
-    const [{ teams, managers }, people] = await Promise.all([api.teams(), api.teamOverview()]);
-    return { teams, managers, people: people.filter((p) => p.is_active) };
+    const [{ teams, managers }, people, features] = await Promise.all([api.teams(), api.teamOverview(), api.features()]);
+    return { teams, managers, people: people.filter((p) => p.is_active), workLocation: features.includes('work_location' as Feature) };
   }, []);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,16 +50,18 @@ export default function Teams() {
       {data?.teams.map((t) => (
         <TeamCard key={t.id} team={t} people={data.people}
           managerIds={data.managers.filter((m) => m.team_id === t.id).map((m) => m.employee_id)}
-          busy={busy} run={run} />
+          workLocation={data.workLocation} busy={busy} run={run} />
       ))}
     </Screen>
   );
 }
 
-function TeamCard({ team, people, managerIds, busy, run }: {
-  team: Team; people: TeamRow[]; managerIds: string[]; busy: boolean; run: (fn: () => Promise<unknown>) => void;
+function TeamCard({ team, people, managerIds, workLocation, busy, run }: {
+  team: Team; people: TeamRow[]; managerIds: string[]; workLocation: boolean; busy: boolean;
+  run: (fn: () => Promise<unknown>) => void;
 }) {
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [officeDays, setOfficeDays] = useState(team.office_days_per_week == null ? '' : String(team.office_days_per_week));
   const managers = people.filter((p) => p.role === 'manager');
   const members = people.filter((p) => p.role !== 'owner');
 
@@ -83,6 +85,22 @@ function TeamCard({ team, people, managerIds, busy, run }: {
           </View>
         </View>
       ) : <Button small variant="ghost" title="Rename" onPress={() => setRenaming(team.name)} />}
+
+      {workLocation ? (
+        <>
+          <Field label="Office days per week" value={officeDays} onChangeText={setOfficeDays}
+            keyboardType="number-pad" hint="1 to 7, or empty to use the company number (Monitoring & privacy)." />
+          <Button small variant="secondary" title="Save office days" loading={busy} onPress={() => {
+            const text = officeDays.trim();
+            const days = text === '' ? null : Number(text);
+            if (days !== null && (!Number.isInteger(days) || days < 1 || days > 7)) {
+              notify('Office days', 'Enter a whole number from 1 to 7, or leave the field empty.');
+              return;
+            }
+            run(() => api.setTeamOfficeDays(team.id, days));
+          }} />
+        </>
+      ) : null}
 
       <Text style={styles.label}>Managers of this team</Text>
       {managers.length === 0 ? <Text style={styles.hint}>No one has the Manager role yet (set it under Manage employee).</Text> : null}

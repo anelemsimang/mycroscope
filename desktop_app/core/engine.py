@@ -48,6 +48,7 @@ class TrackingSettings:
     detect_network_drives: bool = False
     ask_offline_reason: bool = False
     offline_prompt_minutes: int = 10
+    track_work_location: bool = False
     schedule: Schedule = field(default_factory=Schedule)
 
     @classmethod
@@ -78,6 +79,7 @@ class TrackingSettings:
             ask_offline_reason=self.ask_offline_reason and a.ask_offline_reason,
             # A shorter wait asks more often, so it waits for the new notice. A longer wait applies at once.
             offline_prompt_minutes=max(self.offline_prompt_minutes, a.offline_prompt_minutes),
+            track_work_location=self.track_work_location and a.track_work_location,
             schedule=self.schedule.narrowed_to(acknowledged.schedule if acknowledged else None),
         )
 
