@@ -15,6 +15,8 @@ const ACTION_LABEL: Record<string, string> = {
   case_study_ended: 'Case study ended',
   case_study_invited: 'Case study invite saved',
   case_study_invite_cancelled: 'Case study invite cancelled',
+  ai_tool_saved: 'AI tool saved',
+  ai_tool_deleted: 'AI tool removed',
 };
 
 function describe(e: OperatorAuditEntry, orgNames: Map<string, string>): string {
@@ -33,6 +35,8 @@ function describe(e: OperatorAuditEntry, orgNames: Map<string, string>): string 
   if (typeof d.accounts === 'number') parts.push(`Logins removed: ${d.accounts}`);
   if (typeof d.email === 'string') parts.push(`Email: ${d.email}`);
   if (typeof d.months === 'number' && d.months > 0) parts.push(`Free period: ${d.months} months`);
+  if (typeof d.tool === 'string') parts.push(`Tool: ${d.tool}`);
+  if (typeof d.enabled === 'boolean') parts.push(d.enabled ? 'Shown to companies' : 'Hidden');
   return parts.filter(Boolean).join('\n');
 }
 

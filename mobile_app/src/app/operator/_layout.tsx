@@ -29,6 +29,7 @@ export default function OperatorLayout() {
       <Stack.Screen name="org/[id]" options={{ title: 'Customer' }} />
       <Stack.Screen name="audit" options={{ title: 'Operator Audit Log' }} />
       <Stack.Screen name="case-studies" options={{ title: 'Case Studies' }} />
+      <Stack.Screen name="ai-tools" options={{ title: 'AI Tools' }} />
     </Stack>
   );
 }

@@ -1332,6 +1332,60 @@ test('office and remote days: notice, one result per day, and the weekly target'
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 
+test('AI tools: operator list, adoption, and an alert when a tool is not approved', async () => {
+  const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
+  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  const chatgpt = (await db.query(`select id from ai_tools where name = 'ChatGPT'`)).rows[0].id;
+  await rejects(asUser(ctx.ownerAuth, `select set_ai_tool_approval($1, 'unapproved')`, [chatgpt]), /not included/);
+  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await rejects(asUser(ctx.mgrAuth, `select set_ai_tool_approval($1, 'unapproved')`, [chatgpt]), /Not allowed/);
+  await rejects(asUser(ctx.ownerAuth,
+    `select op_save_ai_tool(null, 'TestAI', array['testai.example'], array[]::text[], true)`), /Not allowed/);
+  await asUser2fa(ctx.opAuth,
+    `select op_save_ai_tool(null, 'TestAI', array['testai.example'], array[]::text[], true)`);
+  await rejects(asUser(ctx.ownerAuth, 'select * from ai_tools'), /permission denied/);
+
+  const today = `(now() at time zone 'Africa/Johannesburg')::date`;
+  await db.query(`insert into daily_usage (employee_id, day, app_name, domain, organization_id, active_seconds) values
+      ($1, ${today}, 'Google Chrome', 'chat.openai.com', $2, 600),
+      ($1, ${today}, 'Google Chrome', 'a.claude.ai', $2, 300)
+    on conflict (employee_id, day, app_name, domain) do update set active_seconds = excluded.active_seconds`,
+    [ctx.empId, ctx.orgId]);
+  await asUser(ctx.ownerAuth, `select set_ai_tool_approval($1, 'unapproved')`, [chatgpt]);
+  await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)', [JSON.stringify({ alert_unapproved_ai: true })]);
+  const notice = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.match(notice.notice_text, /marked as not approved/);
+
+  const chat = (await asUser(ctx.ownerAuth, `select people_using, approved from get_ai_adoption(${today}, ${today}, null)
+      where tool_name = 'ChatGPT'`)).rows[0];
+  assert.equal(Number(chat.people_using), 1);
+  assert.equal(chat.approved, false);
+  const claude = (await asUser(ctx.ownerAuth, `select people_using from get_ai_adoption(${today}, ${today}, null)
+      where tool_name = 'Claude'`)).rows[0];
+  assert.equal(Number(claude.people_using), 1, 'a subdomain counts as the tool');
+  const person = (await asUser(ctx.ownerAuth, `select level, days_used, before_hours from get_ai_person_usage(${today} - 13, ${today}, null)
+      where employee_id = $1 and tool_name = 'ChatGPT'`, [ctx.empId])).rows[0];
+  assert.equal(person.level, 'occasional');
+  assert.equal(Number(person.days_used), 1);
+  assert.equal(person.before_hours, null, 'a comparison needs history on both sides');
+
+  const alerts = (await asUser(ctx.ownerAuth, `select details from get_integrity_alerts(now() - interval '2 days')
+      where kind = 'unapproved_ai'`)).rows;
+  assert.ok(alerts.some((r) => r.details.tool === 'ChatGPT'));
+  await asUser(ctx.ownerAuth, `select set_ai_tool_approval($1, 'approved')`, [chatgpt]);
+  const after = (await asUser(ctx.ownerAuth, `select details from get_integrity_alerts(now() - interval '2 days')
+      where kind = 'unapproved_ai'`)).rows;
+  assert.ok(!after.some((r) => r.details.tool === 'ChatGPT'));
+
+  await db.query(`delete from daily_usage where employee_id = $1 and domain in ('chat.openai.com', 'a.claude.ai')`, [ctx.empId]);
+  await asUser(ctx.ownerAuth, `select set_ai_tool_approval($1, 'unset')`, [chatgpt]);
+  await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)', [JSON.stringify({ alert_unapproved_ai: false })]);
+  await db.query(`delete from ai_tools where name = 'TestAI'`);
+  const quiet = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
+  assert.doesNotMatch(quiet.notice_text, /marked as not approved/);
+  await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
+});
+
 test('the sign-in reminder migration republishes every notice without changing settings', async () => {
   const before = (await asUser(ctx.ownerAuth, 'select version, settings_snapshot from monitoring_policies order by version desc limit 1')).rows[0];
   await db.exec(readFileSync(path.join(migrationsDir, '20261010090000_notice_sign_in_reminders.sql'), 'utf8'));

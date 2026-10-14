@@ -26,6 +26,7 @@ export const ALERT_TITLES: Record<string, string> = {
   policy_violation: 'Alert rule',
   device_connected: 'Device connected',
   files_copied: 'Files copied',
+  unapproved_ai: 'Unapproved AI tool',
   test: 'Test',
 };
 
@@ -89,6 +90,8 @@ export function describeAlert(a: Pick<ChannelAlert, 'kind' | 'details'>): string
       return d.destination === 'phone'
         ? `A phone${d.label ? ` ("${str(d.label)}")` : ''} was connected to the PC.`
         : `A USB drive or external disk${d.label ? ` ("${str(d.label)}")` : ''} was connected to the PC.`;
+    case 'unapproved_ai':
+      return `Used ${str(d.tool) || 'an AI tool'}, which the company has marked as not approved, for ${duration(num(d.seconds))}.`;
     case 'files_copied': {
       const files = num(d.files);
       const where = DESTINATIONS[str(d.destination)] ?? 'another location';

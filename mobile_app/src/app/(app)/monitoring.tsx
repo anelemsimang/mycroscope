@@ -36,6 +36,7 @@ export default function Monitoring() {
       settings, current: policies[0] ?? null,
       fileActivity: features.includes('file_activity'),
       workLocation: features.includes('work_location'),
+      aiTools: features.includes('ai_tools'),
       orgWide: manageableTeams(teams, managers, profile).orgWide,
     };
   }, [profile.organizationId]);
@@ -43,12 +44,13 @@ export default function Monitoring() {
   if (loading && !data) return <Loading />;
   if (!data) return <Screen><ErrorBanner message={error ?? 'Could not load settings.'} onRetry={refresh} /></Screen>;
   return <MonitoringForm key={data.settings.updated_at} initial={data.settings} current={data.current}
-    fileActivityAllowed={data.fileActivity} workLocationAllowed={data.workLocation} orgWide={data.orgWide} onSaved={refresh} />;
+    fileActivityAllowed={data.fileActivity} workLocationAllowed={data.workLocation}
+    aiToolsAllowed={data.aiTools} orgWide={data.orgWide} onSaved={refresh} />;
 }
 
-function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAllowed, orgWide, onSaved }: {
+function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAllowed, aiToolsAllowed, orgWide, onSaved }: {
   initial: ComplianceSettings; current: { version: number; notice_text: string; published_at: string } | null;
-  fileActivityAllowed: boolean; workLocationAllowed: boolean; orgWide: boolean; onSaved: () => void;
+  fileActivityAllowed: boolean; workLocationAllowed: boolean; aiToolsAllowed: boolean; orgWide: boolean; onSaved: () => void;
 }) {
   const profile = useProfile();
   const { aal, reloadService } = useSession();
@@ -226,6 +228,23 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
         <Field label="Office days per week" value={officeDays} onChangeText={setOfficeDays}
           keyboardType="number-pad" hint="1 to 7, or leave empty when the company has no target. A team can set its own number under Teams. A day counts when someone was in an office for part of it." />
         <OfficeList orgWide={orgWide} allowed={workLocationAllowed} />
+      </Card>
+
+      <Card title="AI tools">
+        <Text style={styles.hint}>
+          Insights shows which AI tools people used. Mark each tool approved or not approved there. This switch tells
+          managers when someone uses a tool marked as not approved, and adds that sentence to the employee notice.
+        </Text>
+        {!aiToolsAllowed ? (
+          <Text style={[styles.hint, { color: colors.danger }]}>
+            AI tool reports are not included in your plan. Contact Mycroscope to upgrade.
+          </Text>
+        ) : null}
+        <ToggleRow label="Tell managers when someone uses an AI tool marked as not approved"
+          value={draft.alert_unapproved_ai}
+          disabled={!aiToolsAllowed && !draft.alert_unapproved_ai}
+          onChange={(v) => set('alert_unapproved_ai', v)}
+          hint="Included on Business, Enterprise, and the trial. The list of tools is kept by Mycroscope." />
       </Card>
 
       <Card title="When monitoring happens">

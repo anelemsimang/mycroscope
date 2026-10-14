@@ -256,6 +256,19 @@ supabase functions deploy client-ip
 Reinstall `Mycroscope-Setup.exe` for this. A VPN that exits through the office will look like the office. Two PCs on
 the same day are combined: one at the office and one elsewhere makes the day mixed.
 
+`20261019090000_ai_tools.sql` (apply after the one above) adds **AI tool reports** on Business, Enterprise, and the
+trial. Mycroscope keeps one list of tools (ChatGPT, Claude, Gemini, Microsoft Copilot, and Perplexity to start).
+Operators add, edit, hide, or remove tools in the operator console. A website matches the tool and its subdomains;
+an app name must match exactly. A company marks each tool approved, not approved, or leaves it with no decision
+(Insights -> AI tools, owners and organisation-wide managers). The report shows how many people used each tool, and
+whether each person was occasional (under two days a week) or consistent. When someone's first use falls in the
+selected period, and both the 28 days before and the 28 days from that day have at least five days of computer
+activity, the report also shows average productive computer hours before and after. That is a correlation. Time in
+the tool counts toward those hours when the tool's category is productive.
+
+Monitoring & privacy -> AI tools turns on an alert for tools marked not approved. It stays off until switched on,
+and the employee notice gains a sentence only then. The desktop app does not change for this.
+
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
 Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.
 

@@ -61,6 +61,8 @@ export function describeAlert(a: Pick<IntegrityAlert, 'kind' | 'details'>): stri
       const where = DESTINATIONS[String(d.destination)] ?? 'another location';
       return `${files} ${files === 1 ? 'file' : 'files'} (${formatBytes(n(d.bytes))}) copied to ${where}${d.label ? ` ("${String(d.label)}")` : ''}. File names are on the employee's page.`;
     }
+    case 'unapproved_ai':
+      return `Used ${String(d.tool ?? 'an AI tool')}, which this company has marked as not approved, for ${minutesText(n(d.seconds))}. This is time the app or site was open.`;
     default:
       return a.kind.replace(/_/g, ' ');
   }
@@ -80,4 +82,5 @@ export const ALERT_TITLES: Record<string, string> = {
   policy_violation: 'Alert rule',
   device_connected: 'Device connected',
   files_copied: 'Files copied',
+  unapproved_ai: 'Unapproved AI tool',
 };

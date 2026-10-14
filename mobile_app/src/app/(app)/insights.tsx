@@ -6,10 +6,10 @@ import {
   BarRow, Button, Card, Empty, ErrorBanner, Field, InnerTabs, Loading, Screen, Segmented, StackedBar, StatGrid, colors, styles,
 } from '@/components/ui';
 import {
-  api, errorMessage, type CapacityRow, type Feature, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
+  api, errorMessage, type AiAdoptionRow, type AiCatalogTool, type AiPersonUsage, type CapacityRow, type Feature, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
   type WorkloadStatus,
 } from '@/lib/api';
-import { confirmAction } from '@/lib/dialog';
+import { confirmAction, notify } from '@/lib/dialog';
 import {
   addDays, daysBetween, formatDay, formatDuration, formatMoney, percent, periodRange, todayIn, type Ymd,
 } from '@/lib/format';
@@ -17,7 +17,7 @@ import { manageableTeams } from '@/lib/scope';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
-type Tab = 'trends' | 'workload' | 'capacity' | 'software' | 'where';
+type Tab = 'trends' | 'workload' | 'capacity' | 'software' | 'where' | 'ai';
 type Period = 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'last_30' | 'last_90' | 'last_365';
 
 const ALL = '__all__';
@@ -32,9 +32,11 @@ const PERIODS: { value: Period; label: string }[] = [
 ];
 const TAB_FEATURE: Record<Tab, Feature> = {
   trends: 'trends', workload: 'workload', capacity: 'workload', software: 'software_usage', where: 'work_location',
+  ai: 'ai_tools',
 };
 const TAB_LABEL: Record<Tab, string> = {
   trends: 'Trends', workload: 'Workload', capacity: 'Capacity', software: 'Software', where: 'Office days',
+  ai: 'AI tools',
 };
 
 /** The "last N days" periods end yesterday so a half-finished day doesn't drag the averages down. */
@@ -107,6 +109,7 @@ export default function Insights() {
       {current === 'capacity' ? <Capacity from={range.from} to={range.to} orgWide={scope.orgWide} teams={scope.teams} /> : null}
       {current === 'software' ? <Software from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
       {current === 'where' ? <Where from={range.from} to={range.to} team={teamId} /> : null}
+      {current === 'ai' ? <AiTools from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
     </Screen>
   );
 }
@@ -263,6 +266,98 @@ function WhereRow({ row }: { row: OfficeAdherence }) {
         {row.office_days} office {row.office_days === 1 ? 'day' : 'days'}
         {row.mixed_days > 0 ? ` (${row.mixed_days} mixed)` : ''} · {row.remote_days} remote · {target}
       </Text>
+    </View>
+  );
+}
+
+// ---- AI tools ------------------------------------------------------------------
+
+function AiTools({ from, to, team, orgWide }: { from: Ymd; to: Ymd; team: string | null; orgWide: boolean }) {
+  const { data, error, loading, refresh } = useAsync(async () => {
+    const [adoption, people, catalog] = await Promise.all([
+      api.aiAdoption(from, to, team),
+      api.aiPersonUsage(from, to, team),
+      orgWide ? api.aiCatalog() : Promise.resolve([] as AiCatalogTool[]),
+    ]);
+    return { adoption, people, catalog };
+  }, [from, to, team, orgWide]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function setStatus(tool: AiCatalogTool, status: 'approved' | 'unapproved' | 'unset') {
+    setBusy(tool.id);
+    try {
+      await api.setAiToolApproval(tool.id, status);
+      refresh();
+    } catch (e) {
+      notify('Could not save', errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (error) return <ErrorBanner message={error} onRetry={refresh} />;
+  if (loading && !data) return <Loading />;
+  if (!data) return null;
+  const using = data.adoption.filter((r) => r.people_using > 0);
+  return (
+    <>
+      <Card title="Who used an AI tool">
+        <Text style={styles.hint}>
+          A person counts when the tool's website or app was open at least once in this period. Occasional means under
+          two days a week; consistent means two or more. The before and after figures compare productive computer time
+          in the 28 days before someone's first use with the 28 days from that first use. They appear only when both
+          sides have at least five days with computer activity, and they show a correlation, not a cause. Time in the
+          tool itself counts toward those productive hours when the tool's category is productive.
+        </Text>
+        {using.length === 0 ? <Empty text="No AI tool use in this period." /> : null}
+        {using.map((row) => (
+          <AiToolBlock key={row.tool_id} row={row} people={data.people.filter((p) => p.tool_id === row.tool_id)} />
+        ))}
+      </Card>
+      {orgWide ? (
+        <Card title="Approved tools">
+          <Text style={styles.hint}>
+            Mark a tool approved, not approved, or leave it with no decision. An alert is sent only for a tool marked
+            not approved, and only when that alert is switched on under Monitoring & privacy.
+          </Text>
+          {data.catalog.map((tool) => {
+            const status = tool.approved === true ? 'approved' : tool.approved === false ? 'unapproved' : 'unset';
+            return (
+              <View key={tool.id} style={{ paddingVertical: 6, gap: 4 }}>
+                <Text style={styles.rowText}>{tool.name}</Text>
+                <Text style={styles.hint}>{[...tool.domains, ...tool.app_names].join(', ') || 'No website or app name'}</Text>
+                <Segmented
+                  options={[
+                    { value: 'approved', label: 'Approved' },
+                    { value: 'unapproved', label: 'Not approved' },
+                    { value: 'unset', label: 'No decision' },
+                  ]}
+                  value={status}
+                  onChange={(v) => { if (v !== status && !busy) setStatus(tool, v); }}
+                />
+              </View>
+            );
+          })}
+        </Card>
+      ) : null}
+    </>
+  );
+}
+
+function AiToolBlock({ row, people }: { row: AiAdoptionRow; people: AiPersonUsage[] }) {
+  const mark = row.approved === true ? 'Approved' : row.approved === false ? 'Not approved' : 'No decision';
+  return (
+    <View style={{ paddingVertical: 8, gap: 2 }}>
+      <Text style={styles.rowText}>{row.tool_name} · {mark}</Text>
+      <Text style={styles.hint}>{row.people_using} of {row.people} {row.people === 1 ? 'person' : 'people'}</Text>
+      {people.map((p) => (
+        <Text key={p.employee_id} style={styles.hint}>
+          {p.name}: {p.level === 'consistent' ? 'consistent' : 'occasional'} ({p.days_used} {p.days_used === 1 ? 'day' : 'days'}, {p.days_per_week} a week)
+          {p.before_hours !== null && p.after_hours !== null
+            ? `. Productive computer time averaged ${p.before_hours} h a day before first use and ${p.after_hours} h after (${p.before_days} and ${p.after_days} days).`
+            : ''}
+        </Text>
+      ))}
     </View>
   );
 }

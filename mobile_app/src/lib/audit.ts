@@ -32,6 +32,7 @@ const SETTING_LABELS: Record<string, string> = {
   productive_offline_reasons: 'Productive time away',
   track_work_location: 'Office and remote days',
   office_days_per_week: 'Office days per week',
+  alert_unapproved_ai: 'Unapproved AI tool alert',
 };
 
 function settingValue(key: string, value: unknown): string {
@@ -142,6 +143,8 @@ export function describeAudit(
       return { actor, title: `Removed office ${str(d.name)}`, detail: '' };
     case 'team_office_days':
       return { actor, title: 'Set a team office-day target', detail: d.days == null ? 'Uses the company number' : `${str(d.days)} days a week` };
+    case 'ai_tool_approval':
+      return { actor, title: 'AI tool decision', detail: str(d.status) === 'unset' ? 'No decision' : str(d.status) };
     default:
       return { actor, title: e.action.replace(/_/g, ' '), detail: '' };
   }

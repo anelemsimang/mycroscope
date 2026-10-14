@@ -129,6 +129,7 @@ export interface ComplianceSettings {
   track_work_location: boolean;
   /** Null when the company has not set a weekly office-day target. */
   office_days_per_week: number | null;
+  alert_unapproved_ai: boolean;
   require_mfa: boolean;
   information_officer_name: string | null;
   information_officer_email: string | null;
@@ -139,7 +140,7 @@ const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track
   'allow_pause,retention_days,summary_retention_days,notice_custom_text,tracking_schedule,work_days,work_start,' +
   'work_end,flag_after_hours_use,detect_tampering,detect_removable_media,detect_cloud_sync,detect_network_drives,' +
   'file_retention_days,ask_offline_reason,offline_prompt_minutes,productive_offline_reasons,' +
-  'track_work_location,office_days_per_week,require_mfa,updated_at';
+  'track_work_location,office_days_per_week,alert_unapproved_ai,require_mfa,updated_at';
 
 export type ServiceLevel = 'full' | 'read_only';
 export interface ServiceStatus {
@@ -172,12 +173,21 @@ export interface OfficeAdherence {
 }
 export interface TeamManager { team_id: string; employee_id: string }
 
+export interface AiCatalogTool { id: string; name: string; domains: string[]; app_names: string[]; approved: boolean | null }
+export interface AiAdoptionRow { tool_id: string; tool_name: string; approved: boolean | null; people_using: number; people: number }
+export interface AiPersonUsage {
+  employee_id: string; name: string; tool_id: string; tool_name: string;
+  days_used: number; days_per_week: number; level: 'occasional' | 'consistent';
+  before_hours: number | null; after_hours: number | null; before_days: number | null; after_days: number | null;
+}
+export interface OperatorAiTool { id: string; name: string; domains: string[]; app_names: string[]; enabled: boolean }
+
 export type Category = 'productive' | 'neutral' | 'unproductive';
 export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category; team_id: string | null }
 
 /** Plan features (see plan_features in the database). */
 export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage'
-  | 'alert_rules' | 'channels' | 'file_activity' | 'api' | 'work_location';
+  | 'alert_rules' | 'channels' | 'file_activity' | 'api' | 'work_location' | 'ai_tools';
 
 export type Severity = 'low' | 'medium' | 'high';
 export interface AlertRule {
@@ -653,6 +663,17 @@ export const api = {
       numeric(await rpc<OfficeAdherence[]>('get_office_adherence', { p_from: from, p_to: to, p_team: team ?? null }),
         ['office_days', 'remote_days', 'mixed_days', 'weeks_judged']),
       ['target_per_week', 'weeks_met']),
+  aiCatalog: () => rpc<AiCatalogTool[]>('get_ai_catalog'),
+  setAiToolApproval: (tool: string, status: 'approved' | 'unapproved' | 'unset') =>
+    rpc<void>('set_ai_tool_approval', { p_tool: tool, p_status: status }),
+  aiAdoption: async (from: Ymd, to: Ymd, team?: string | null) =>
+    numeric(await rpc<AiAdoptionRow[]>('get_ai_adoption', { p_from: from, p_to: to, p_team: team ?? null }),
+      ['people_using', 'people']),
+  aiPersonUsage: async (from: Ymd, to: Ymd, team?: string | null) =>
+    nullableNumeric(
+      numeric(await rpc<AiPersonUsage[]>('get_ai_person_usage', { p_from: from, p_to: to, p_team: team ?? null }),
+        ['days_used', 'days_per_week']),
+      ['before_hours', 'after_hours', 'before_days', 'after_days']),
   deleteTeam: (id: string) => rpc<void>('delete_team', { p_team: id }),
   setEmployeeTeam: (employee: string, team: string | null) => rpc<void>('set_employee_team', { p_employee: employee, p_team: team }),
   setTeamManagers: (team: string, managers: string[]) => rpc<void>('set_team_managers', { p_team: team, p_managers: managers }),
@@ -837,4 +858,8 @@ export const operatorApi = {
   inviteCaseStudy: (email: string, months: number, note: string) =>
     rpc<void>('op_invite_case_study', { p_email: email, p_months: months, p_note: note }),
   cancelCaseStudyInvite: (email: string) => rpc<void>('op_cancel_case_study_invite', { p_email: email }),
+  aiTools: () => rpc<OperatorAiTool[]>('op_ai_tools'),
+  saveAiTool: (id: string | null, name: string, domains: string[], apps: string[], enabled: boolean) =>
+    rpc<OperatorAiTool>('op_save_ai_tool', { p_id: id, p_name: name, p_domains: domains, p_apps: apps, p_enabled: enabled }),
+  deleteAiTool: (id: string) => rpc<void>('op_delete_ai_tool', { p_id: id }),
 };

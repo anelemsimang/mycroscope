@@ -76,6 +76,8 @@ export default function OperatorHome() {
       <Card>
         <LinkRow title="Case studies" subtitle="Free periods for selected companies, including ones not signed up yet"
           onPress={() => router.push('/operator/case-studies')} />
+        <LinkRow title="AI tools" subtitle="The shared list companies mark as approved or not"
+          onPress={() => router.push('/operator/ai-tools')} />
         <LinkRow title="Operator audit log" subtitle="Everything operators have done" onPress={() => router.push('/operator/audit')} />
         <Text style={styles.hint}>
           Operators cannot see customers' activity data. Support views need the customer's time-limited permission and
