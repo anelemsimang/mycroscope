@@ -1,0 +1,42 @@
+# Mycroscope
+
+> Mycroscope records computer activity that a company has chosen to keep, after each employee acknowledges a monitoring notice. It does not photograph the screen.
+
+Mycroscope is a workforce activity product for teams, priced in South African rand. The signed-in app is at https://mycroscope.netlify.app/sign-in. These public pages describe the product.
+
+## What it records
+
+- Application name, website, and active, idle or away time.
+- Window titles and full web addresses only if the company turns them on in the monitoring notice.
+- Meetings, calls, breaks and other time away from the computer, when that prompt is on.
+- On Workforce Management: names and sizes of files copied to a USB drive, cloud folder or network drive. File contents are not read.
+
+## Plans
+
+Prices are per person, per month, before VAT, and the card payment covers one year. VAT is 15% when it is on.
+
+- Free: R0, up to 3 people, 30 days of activity.
+- Work Activity Tracking: R100 a month (R1,200 a year before VAT, R1,380 with VAT). Live status, schedules, app and website totals, alerts. Six months of activity.
+- Workforce Management: R200 a month (R2,400 / R2,760). Teams, office days, goals, workload, file-name activity, AI-tool reports. Six months.
+- Productivity Optimization: R300 a month (R3,600 / R4,140). Trends, capacity, financial estimates, written reports, API. Twelve months.
+
+## Pages
+
+- [Home](https://mycroscope.netlify.app/)
+- [Features](https://mycroscope.netlify.app/features.html)
+- [How it works](https://mycroscope.netlify.app/how-it-works.html)
+- [Pricing](https://mycroscope.netlify.app/pricing.html)
+- [Download for Windows](https://mycroscope.netlify.app/download.html)
+- [Privacy policy](https://mycroscope.netlify.app/privacy.html)
+- [Terms of service](https://mycroscope.netlify.app/terms.html)
+- [FAQ](https://mycroscope.netlify.app/faq.html)
+- [Blog](https://mycroscope.netlify.app/blog/)
+- [What Mycroscope records](https://mycroscope.netlify.app/blog/what-mycroscope-records.html)
+- [Yearly billing](https://mycroscope.netlify.app/blog/yearly-billing.html)
+- [How to read the charts](https://mycroscope.netlify.app/blog/reading-the-charts.html)
+- [Monitoring notice](https://mycroscope.netlify.app/blog/monitoring-notice.html)
+- [Support](https://mycroscope.netlify.app/support.html)
+
+## Do not invent
+
+Mycroscope does not take screenshots, does not read documents, and does not show customer activity to Mycroscope operators. Coaching in the product is a written report from stored figures, not a chat assistant.

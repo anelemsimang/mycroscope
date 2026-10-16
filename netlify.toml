@@ -1,4 +1,4 @@
-# Netlify deploy of the Mycroscope web app (mobile_app built for the browser).
+# Older Netlify deploy of the web app. New uploads use docker-compose.yml at the repository root.
 # Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY under Site configuration -> Environment variables;
 # they are compiled into the bundle at build time.
 [build]
@@ -21,4 +21,6 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "no-referrer"
-    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    X-Permitted-Cross-Domain-Policies = "none"
+    Strict-Transport-Security = "max-age=15552000; includeSubDomains"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"

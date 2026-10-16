@@ -28,7 +28,8 @@ export function OnboardingChecklist({ team }: { team: TeamRow[] | null }) {
     { done: others.some((r) => r.activated), title: 'Install the desktop app on their PC',
       detail: 'They activate it with the code and acknowledge the notice.', href: '/register' },
     { done: aal.next === 'aal2', title: 'Turn on two-factor login', detail: 'Protects your account and your employees\' data.', href: '/settings' },
-    { done: service?.status === 'active', title: 'Choose a subscription', detail: 'Keep recording after the free trial.', href: '/billing' },
+    { done: !!service && service.plan !== 'free' && (service.status === 'active' || service.status === 'past_due'),
+      title: 'Choose a subscription', detail: 'Upgrade when you need more people, a longer history, or paid reports.', href: '/billing' },
   ];
   const remaining = steps.filter((s) => !s.done).length;
   if (remaining === 0) return null;

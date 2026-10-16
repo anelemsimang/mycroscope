@@ -20,7 +20,7 @@ const hhmm = (t: string) => (t ?? '').slice(0, 5);
 const IDLE_MINUTES = [1, 2, 3, 5, 10, 15, 30, 60];
 const LIMITS = { retention_days: [7, 1825], summary_retention_days: [30, 3650], file_retention_days: [7, 365] } as const;
 const OFFLINE_REASONS: { id: OfflineReason; label: string; hint: string }[] = [
-  { id: 'meeting', label: 'Meetings', hint: 'Added to productive time in Insights, workload, capacity and goals.' },
+  { id: 'meeting', label: 'Meetings', hint: 'Added to productive time.' },
   { id: 'call', label: 'Calls', hint: 'Added to productive time, the same way as meetings.' },
   { id: 'break', label: 'Breaks', hint: 'Shown on its own. Left out of productive time unless you turn this on.' },
   { id: 'other', label: 'Other', hint: 'Anything else the employee types a note for. Left out of productive time unless you turn this on.' },
@@ -35,9 +35,9 @@ export default function Monitoring() {
     return {
       settings, current: policies[0] ?? null,
       fileActivity: features.includes('file_activity'),
-      workLocation: features.includes('work_location'),
+      workLocation: features.includes('work_location_insights'),
       aiTools: features.includes('ai_tools'),
-      advisor: features.includes('work_advisor'),
+      advisor: features.includes('coaching'),
       orgWide: manageableTeams(teams, managers, profile).orgWide,
     };
   }, [profile.organizationId]);
@@ -212,43 +212,36 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
         ))}
       </Card>
 
+      {workLocationAllowed ? (
       <Card title="Office and remote">
         <Text style={styles.hint}>
           The desktop app checks whether the PC is on a network you register here (the office's public internet address
           or its Wi-Fi name) and records each day as office, remote, or mixed. A home address and a home network name
           are not stored. The check starts only after the employee has acknowledged the notice.
         </Text>
-        {!workLocationAllowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>
-            Office and remote days are not included in your plan. Contact Mycroscope to upgrade.
-          </Text>
-        ) : null}
         <ToggleRow label="Record office and remote days" value={draft.track_work_location}
-          disabled={!workLocationAllowed && !draft.track_work_location}
           onChange={(v) => set('track_work_location', v)}
-          hint="Included from the Standard plan. Reinstall the desktop app (version 2.5 or later) on each PC." />
+          hint="Reinstall the desktop app (version 2.5 or later) on each PC." />
         <Field label="Office days per week" value={officeDays} onChangeText={setOfficeDays}
           keyboardType="number-pad" hint="1 to 7, or leave empty when the company has no target. A team can set its own number under Teams. A day counts when someone was in an office for part of it." />
         <OfficeList orgWide={orgWide} allowed={workLocationAllowed} />
       </Card>
+      ) : null}
 
+      {aiToolsAllowed ? (
       <Card title="AI tools">
         <Text style={styles.hint}>
           Insights shows which AI tools people used. Mark each tool approved or not approved there. This switch tells
           managers when someone uses a tool marked as not approved, and adds that sentence to the employee notice.
         </Text>
-        {!aiToolsAllowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>
-            AI tool reports are not included in your plan. Contact Mycroscope to upgrade.
-          </Text>
-        ) : null}
         <ToggleRow label="Tell managers when someone uses an AI tool marked as not approved"
           value={draft.alert_unapproved_ai}
-          disabled={!aiToolsAllowed && !draft.alert_unapproved_ai}
           onChange={(v) => set('alert_unapproved_ai', v)}
-          hint="Included on Business, Enterprise, and the trial. The list of tools is kept by Mycroscope." />
+          hint="The list of tools is kept by Mycroscope." />
       </Card>
+      ) : null}
 
+      {advisorAllowed ? (
       <Card title="Written reports">
         <Text style={styles.hint}>
           Insights lets a manager write a report for a period: a week in review, workload, where time went, capacity,
@@ -257,20 +250,14 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
           leads with. The report names the people it describes. Pay figures are left out.
           Nothing is sent to another company. Employees are told in the notice while this is on.
         </Text>
-        {!advisorAllowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>
-            Written reports are not included in your plan. Contact Mycroscope to upgrade.
-          </Text>
-        ) : null}
         <ToggleRow label="Allow written reports" value={draft.advisor_enabled}
-          disabled={!advisorAllowed && !draft.advisor_enabled}
           onChange={(v) => set('advisor_enabled', v)}
-          hint="Included on Business, Enterprise, and the trial. Stays off until you switch it on." />
+          hint="Stays off until you switch it on." />
         <ToggleRow label="Email the weekly note to managers" value={draft.advisor_weekly_email}
-          disabled={!advisorAllowed && !draft.advisor_weekly_email}
           onChange={(v) => set('advisor_weekly_email', v)}
           hint="Owners and managers who can see that team. Uses the same email setup as the weekly digest." />
       </Card>
+      ) : null}
 
       <Card title="When monitoring happens">
         <Segmented options={[{ value: 'always', label: 'Whenever signed in' }, { value: 'work_hours', label: 'Working hours only' }]}
@@ -318,6 +305,7 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
           hint="Flags when the app is stopped while the PC stays on, runs in a virtual machine or remote session, or input comes in a machine-regular rhythm (mouse jigglers). Results appear under Alerts; employees are told in the notice." />
       </Card>
 
+      {fileActivityAllowed ? (
       <Card title="File activity">
         <Text style={styles.hint}>
           Records when a USB drive, external disk or phone is connected, and the names and sizes of files copied onto
@@ -325,26 +313,19 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
           names only on an employee's page, and every view is written to the audit log. Alerts, Slack/Teams messages and
           the API only show counts. Files copied onto a phone cannot be seen, only that a phone was connected.
         </Text>
-        {!fileActivityAllowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>
-            File activity is not included in your plan. Contact Mycroscope to upgrade.
-          </Text>
-        ) : null}
         <ToggleRow label="USB drives, external disks and phones" value={draft.detect_removable_media}
-          disabled={!fileActivityAllowed && !draft.detect_removable_media}
           onChange={(v) => set('detect_removable_media', v)}
           hint="Connections, and files copied onto the drive. Large copies raise a high-severity alert." />
         <ToggleRow label="Cloud sync folders" value={draft.detect_cloud_sync}
-          disabled={!fileActivityAllowed && !draft.detect_cloud_sync}
           onChange={(v) => set('detect_cloud_sync', v)}
           hint="New files in OneDrive, Dropbox and Google Drive folders on the PC. Only large copies raise an alert." />
         <ToggleRow label="Network drives" value={draft.detect_network_drives}
-          disabled={!fileActivityAllowed && !draft.detect_network_drives}
           onChange={(v) => set('detect_network_drives', v)}
           hint="Files the employee copies to mapped network drives (not colleagues' files). Only large copies raise an alert." />
         <Field label="Keep file activity for (days)" value={fileRetention} onChangeText={setFileRetention}
           keyboardType="number-pad" hint="7 to 365. Names and sizes of copied files older than this are deleted nightly." />
       </Card>
+      ) : null}
 
       <Card title="Account security">
         <ToggleRow label="Require two-factor login for managers" value={draft.require_mfa} disabled={!isOwner}
@@ -355,7 +336,7 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
 
       <Card title="Retention">
         <Field label="Keep detailed activity for (days)" value={retention} onChangeText={setRetention}
-          keyboardType="number-pad" hint="7 to 1825. Apps, websites and timelines older than this are deleted nightly." />
+          keyboardType="number-pad" hint="Apps, websites and timelines older than this are hidden. It cannot be longer than the plan. A paid plan is set to that full period." />
         <Field label="Keep daily totals for (days)" value={summaryRetention} onChangeText={setSummaryRetention}
           keyboardType="number-pad" hint="30 to 3650. Daily active/idle totals older than this are deleted nightly." />
       </Card>

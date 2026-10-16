@@ -1,19 +1,19 @@
 // Starts a prepaid Paystack payment for the signed-in organisation owner.
-// Secrets: PAYSTACK_SECRET_KEY, PRICE_PER_SEAT_CENTS. Optional: ANNUAL_DISCOUNT_PERCENT, APP_URL.
+// The per-seat amount is the catalogue gross price of the lowest paid plan.
+// Secrets: PAYSTACK_SECRET_KEY. Optional: ANNUAL_DISCOUNT_PERCENT, APP_URL.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { quote, safeReturnUrl, signTerms } from '../_shared/billing.ts';
 import { CORS, env, json, jwtClaim } from '../_shared/http.ts';
 
-const NOT_SET_UP = 'Online payment is not set up yet. Contact Mycroscope support to pay by EFT.';
+const NOT_SET_UP = 'Online payment is not set up yet.';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
   const secret = env('PAYSTACK_SECRET_KEY');
-  const defaultPrice = Number(env('PRICE_PER_SEAT_CENTS'));
-  if (!secret || !Number.isInteger(defaultPrice) || defaultPrice < 1) return json({ error: NOT_SET_UP }, 503);
+  if (!secret) return json({ error: NOT_SET_UP }, 503);
 
   const token = req.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? '';
   const admin = createClient(env('SUPABASE_URL')!, env('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -28,9 +28,10 @@ Deno.serve(async (req) => {
   if (!me?.is_active || me.role !== 'owner') return json({ error: 'Only the organisation owner can pay.' }, 403);
   const org: string = me.organization_id;
 
-  const [{ data: settings }, { data: sub }, { count: activeCount }] = await Promise.all([
+  const [{ data: settings }, { data: sub }, { data: catalogue }, { count: activeCount }] = await Promise.all([
     admin.from('organization_settings').select('require_mfa').eq('organization_id', org).maybeSingle(),
-    admin.from('subscriptions').select('price_per_seat_cents, currency').eq('organization_id', org).maybeSingle(),
+    admin.from('subscriptions').select('currency').eq('organization_id', org).maybeSingle(),
+    admin.rpc('get_plan_catalogue'),
     admin.from('employees').select('id', { count: 'exact', head: true }).eq('organization_id', org).eq('is_active', true),
   ]);
   if (settings?.require_mfa && jwtClaim(token, 'aal') !== 'aal2') {
@@ -49,9 +50,16 @@ Deno.serve(async (req) => {
   if (Number.isInteger(seats) && seats < (activeCount ?? 0)) {
     return json({ error: `You have ${activeCount} active people. Choose at least that many seats or deactivate someone first.` }, 400);
   }
+  const paid = ((catalogue ?? []) as { rank: number; net_price_cents: number; gross_price_cents: number }[])
+    .filter((p) => Number(p.net_price_cents) > 0)
+    .sort((a, b) => Number(a.rank) - Number(b.rank))[0];
+  const gross = Number(paid?.gross_price_cents);
+  if (!paid || !Number.isInteger(gross) || gross < 1) {
+    return json({ error: NOT_SET_UP }, 503);
+  }
   let q;
   try {
-    q = quote(seats, months, sub.price_per_seat_cents ?? defaultPrice, Number(env('ANNUAL_DISCOUNT_PERCENT') ?? 0));
+    q = quote(seats, months, gross, Number(env('ANNUAL_DISCOUNT_PERCENT') ?? 0));
   } catch (e) {
     return json({ error: (e as Error).message }, 400);
   }

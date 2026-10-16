@@ -8,7 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types src/lib/format.test.ts"
+    "test": "node --test --experimental-strip-types src/lib/format.test.ts src/lib/pdf.test.ts"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.16",
@@ -23,6 +23,7 @@
     "expo-splash-screen": "~57.0.9",
     "expo-sqlite": "~57.0.3",
     "expo-status-bar": "~57.0.1",
+    "pdf-lib": "^1.17.1",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",

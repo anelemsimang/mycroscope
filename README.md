@@ -45,7 +45,7 @@ npx expo start              # press w for the browser (http://localhost:8081), o
   working hours for teams or individual people, teams (owner), subscription and billing,
   the agent install key (the key needed to install the desktop agent on a PC), and time-limited support
   access for Mycroscope (owner).
-- Owners can require two-factor login for all managers; new organisations get a 14-day trial.
+- Owners can require two-factor login for all managers; new organisations start on the free plan (3 people, 30 days of detail).
 - Employees who sign in see only their own activity and can send privacy requests.
 
 Checks: `npm run typecheck`, `npm test`.
@@ -55,17 +55,32 @@ Checks: `npm run typecheck`, `npm test`.
 See [`desktop_app/README.md`](desktop_app/README.md) to run it from source, and
 [`desktop_app/installer/README.txt`](desktop_app/installer/README.txt) to build and install it on employee PCs.
 
-## 4. Putting the web app online (Netlify)
+## 4. Putting the web app and the public site online (Docker)
 
-`netlify.toml` contains the build settings. When ready:
+`docker-compose.yml` builds three images: the signed-in app, the public site, and a private inbox for the
+support form. Supabase still holds the database, sign-in and edge functions. The Windows desktop agent stays
+an installer, not a container.
 
-1. Push the repository to GitHub and create a Netlify site from it (the settings are picked up automatically).
-2. Under **Site configuration -> Environment variables**, add `EXPO_PUBLIC_SUPABASE_URL` and
-   `EXPO_PUBLIC_SUPABASE_ANON_KEY`, then deploy.
-3. Add your domain in Netlify, then in Supabase set the Site URL to it and add `https://<domain>/auth/*` to the
-   Redirect URLs.
-4. Set `EXPO_PUBLIC_WEB_URL` in `mobile_app/.env` (for phone builds) and `WEB_APP_URL` in the desktop agent's
-   configuration to the same address, so emails sent from those apps open the web pages.
+```powershell
+copy .env.example .env
+# Fill in EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY and EXPO_PUBLIC_WEB_URL.
+# EXPO_PUBLIC_WEB_URL is the public address of the app, such as https://app.example.co.za
+docker compose up -d --build
+```
+
+The app listens on port 8080 and the site on port 8081. Put TLS in front of both. In Supabase, set the Site
+URL to the app address and add `https://<app-address>/auth/*` to the Redirect URLs. Set the same app address
+as `WEB_APP_URL` for the desktop agent. Those three `EXPO_PUBLIC_` values are compiled into the app image, so
+changing them needs another build.
+
+Support questions are appended to `/data/support.jsonl` in the `support-inbox` volume:
+
+```powershell
+docker compose exec inbox cat /data/support.jsonl
+```
+
+Phone builds still use `mobile_app/.env` for the same Supabase values. `npm run typecheck` and `npm test` in
+`mobile_app` are unchanged.
 
 ## 5. Database tests
 
@@ -76,33 +91,57 @@ npm test        # runs the migrations in an in-process Postgres and checks secur
                 # then unit-tests the payment and email logic used by the edge functions
 ```
 
-## 6. Payments (Paystack)
+## 6. Payments (Yoco)
 
-Billing is prepaid: the owner picks seats and 1 or 12 months on **Settings -> Subscription & billing**, pays on
-Paystack's page, and the paid period is extended when Paystack confirms the payment. Paying early adds to the end.
-When a subscription lapses (after a 14-day grace period), everything stays viewable and exportable but the
-desktop agent stops recording.
+Owners pay under **Settings -> Subscription & billing**. Prices in the plan catalogue are exclusive of VAT.
+With VAT on (15% by default), Yoco is charged the gross amount for a whole year: every active person times the
+per-person monthly gross price, times 12. Work Activity at R100 a month is R1,200 a year before VAT. The smallest
+charge is R2.00. Yoco does not store the card or renew it. Each payment is one checkout. The `payment.succeeded`
+webhook extends the year. The page the payer returns to is not proof of payment.
 
-1. Create a Paystack business account and complete its verification (needed for live payments).
-2. Install the [Supabase CLI](https://supabase.com/docs/guides/cli), then from the repository root:
+| Plan | Net per person | With 15% VAT | People | Detailed activity |
+| --- | --- | --- | --- | --- |
+| Free | R0 | R0 | 3 | 30 days |
+| Work Activity | R100 | R115 | No cap | 6 months |
+| Workforce | R200 | R230 | No cap | 6 months |
+| Productivity | R300 | R345 | No cap | 12 months |
+
+A higher plan includes everything in the plans below it. Change a price or a feature in `plans` and
+`plan_feature_grants`. Do not hardcode them in the app.
+
+An upgrade starts as soon as Yoco confirms the payment. A mid-year upgrade charges the price difference for
+the days left. Moving from Free charges a full year. A downgrade or cancellation starts when the current year
+ends, with no refund. If a payment is missed, the paid plan stays for 7 days (`billing_config.grace_days`), then
+the account moves to Free. Recording continues. Extra people are paused, not deleted. Activity outside the new
+plan is hidden, and it is deleted only once it is older than the longest plan or older than the shorter limit
+the owner already chose.
+
+1. Create a Yoco account. Use the test secret key until one payment has been confirmed by the webhook.
+2. From the repository root, with the Supabase CLI logged in and the project linked:
 
    ```powershell
-   supabase login
-   supabase link --project-ref YOUR_PROJECT_REF
-   supabase secrets set PAYSTACK_SECRET_KEY=sk_live_... PRICE_PER_SEAT_CENTS=9900 ANNUAL_DISCOUNT_PERCENT=15 APP_URL=https://app.example.co.za
-   supabase functions deploy paystack-checkout
-   supabase functions deploy paystack-webhook --no-verify-jwt
+   supabase functions deploy yoco-checkout
+   supabase functions deploy yoco-webhook billing-reminders --no-verify-jwt
+   supabase secrets set YOCO_SECRET_KEY=sk_test_... YOCO_WEBHOOK_SECRET=whsec_...
    ```
 
-   `PRICE_PER_SEAT_CENTS` is the monthly price per seat in cents (9900 = R99.00). A per-customer price can be set
-   in the `subscriptions.price_per_seat_cents` column. `ANNUAL_DISCOUNT_PERCENT` (optional, at most 50) applies
-   to 12-month payments.
-3. In Paystack **Settings -> API Keys & Webhooks**, set the webhook URL to
-   `https://YOUR_PROJECT_REF.supabase.co/functions/v1/paystack-webhook`.
-4. Test with the `sk_test_...` key and Paystack's test cards first, then switch to the live key.
+   `APP_URL` and `CRON_SECRET` are already set. The morning payment email also needs `RESEND_API_KEY` and
+   `EMAIL_FROM` (section 7). The account still moves to Free after the grace window if email is not configured.
+3. In Yoco, subscribe to `payment.succeeded` at
+   `https://YOUR_PROJECT_REF.supabase.co/functions/v1/yoco-webhook`.
+4. Before the first tax invoice, set the supplier VAT number. The business name is already stored.
 
-Without these secrets the billing page explains that online payment is not set up; EFT payments can be recorded
-by an operator (section 8).
+   ```sql
+   update public.billing_config set business_vat_number = 'YOUR-VAT-NUMBER';
+   ```
+
+   Leave `vat_enabled` true. Set it to false only when VAT must not be charged. The invoice then has no VAT
+   line, and Yoco is charged the net price.
+
+`supabase/setup/schedule_billing.sql` is already applied on this project. Do not run it again. The Paystack
+functions are still in the repository. The billing screen uses Yoco.
+
+Without `YOCO_SECRET_KEY` the billing page says online payment is not set up.
 
 ## 7. Manager emails (Resend)
 
@@ -133,14 +172,8 @@ audit log and, where it affects a customer, in that customer's audit log.
 2. Create the account: either Supabase **Authentication -> Users -> Add user** with that email, or the app's
    registration form (the organisation fields are ignored for invited emails; no organisation is created).
    Sign in; operator accounts must set up two-factor login before the console opens.
-3. Use the console to extend trials, record EFT payments (set the status to Active, the seats and the paid-until
-   date, with a note), suspend or cancel customers, and delete a cancelled customer's data on request.
-
-**Case studies** (free periods for selected companies): **Operator Console -> Case studies**. Invite the owner's
-email before they sign up (3, 6, 12 or 24 months), and the free period starts automatically when they register
-the organisation. Companies already using Mycroscope get one from their customer page. When the free period ends,
-the normal 14-day trial runs; it can be ended early or restarted. The customer sees "Free case study until ..."
-and every change appears in both audit logs. Needs `supabase/migrations/20261008090000_case_studies.sql`.
+3. From the console, suspend or cancel a customer, or delete a cancelled customer's data on request.
+   Seats and the paid-until date are set when a payment is confirmed. That payment covers one year from the confirmation.
 
 The "Used without signing in" alert (a PC in use for 15 minutes with nobody signed in to the agent) needs
 `supabase/migrations/20261009090000_unattended_use.sql` and agent 2.1 or later.
@@ -154,8 +187,9 @@ and used during working hours, e.g. the agent was removed, the PC restarted and 
 "App uninstalled" (the uninstaller reported the removal). Both appear under Alerts and in the alert emails.
 
 `20261014090000_team_settings_and_goals.sql` adds:
-- **Plan features:** `plan_features(plan)` decides what each plan includes (trials get everything; goals need
-  Business or Enterprise). Change a customer's plan in the operator console.
+- **Plan features:** `plan_features(plan)` decides what each plan includes (goals need Business or Enterprise).
+  Change a customer's plan in the operator console. The trial plan was removed by
+  `20261028090000_remove_trial_and_case_studies.sql`.
 - **Productivity categories per team:** a team's rule beats the company rule for the same app or website.
 - **Working hours per team or person:** Settings -> Organisation -> Working hours. A person's own hours beat
   their team's, which beat the company's. They are listed in the monitoring notice, so changes publish a new
@@ -262,8 +296,8 @@ supabase functions deploy client-ip
 Reinstall `Mycroscope-Setup.exe` for this. A VPN that exits through the office will look like the office. Two PCs on
 the same day are combined: one at the office and one elsewhere makes the day mixed.
 
-`20261019090000_ai_tools.sql` (apply after the one above) adds **AI tool reports** on Business, Enterprise, and the
-trial. Mycroscope keeps one list of tools (ChatGPT, Claude, Gemini, Microsoft Copilot, and Perplexity to start).
+`20261019090000_ai_tools.sql` (apply after the one above) adds **AI tool reports** on Business and Enterprise.
+Mycroscope keeps one list of tools (ChatGPT, Claude, Gemini, Microsoft Copilot, and Perplexity to start).
 Operators add, edit, hide, or remove tools in the operator console. A website matches the tool and its subdomains;
 an app name must match exactly. A company marks each tool approved, not approved, or leaves it with no decision
 (Insights -> AI tools, owners and organisation-wide managers). The report shows how many people used each tool, and
@@ -275,8 +309,8 @@ the tool counts toward those hours when the tool's category is productive.
 Monitoring & privacy -> AI tools turns on an alert for tools marked not approved. It stays off until switched on,
 and the employee notice gains a sentence only then. The desktop app does not change for this.
 
-`20261020090000_work_advisor.sql` (apply after the one above) adds **written reports** on Business, Enterprise, and the
-trial. It stays off until an owner switches it on under Monitoring & privacy. A manager picks a report in
+`20261020090000_work_advisor.sql` (apply after the one above) adds **written reports** on Business and Enterprise.
+It stays off until an owner switches it on under Monitoring & privacy. A manager picks a report in
 Insights -> Advice: week in review, workload, where time went, capacity, or how the period changed. The report is
 written inside Mycroscope from the trends, workload, capacity and software figures already stored, using that
 manager's own sign-in so a team manager only sees their teams. Every number in the report comes from those figures.
@@ -300,13 +334,19 @@ No API key is required. Then run `supabase/setup/schedule_advisor.sql` in the SQ
 URL. The same `CRON_SECRET` as the manager emails is reused. Weekly email uses the existing `RESEND_API_KEY` and
 `EMAIL_FROM`. The desktop app does not change for this.
 
-`20261021090000_free_plan.sql` (apply after the one above) keeps sign-up as a **14-day trial**, then moves the company
-to the **free plan**. The nightly job records that: plan `free`, up to 3 active people, and detailed activity kept for
-30 days. Paid reports (trends, goals, workload, AI tools, written reports, and the rest) are not included. Recording
-continues for the people already on the free plan. A fourth person cannot be added or switched back on until someone
-is deactivated or the company pays. People already over 3 stay active until the company deactivates them. Paystack
-checkout is unchanged and moves a free company to Standard. The operator console can also set the plan to free.
-The desktop app does not change for this.
+`20261021090000_free_plan.sql` (apply after the one above) added the **free plan**: up to 3 active people, and detailed
+activity kept for 30 days. Paid reports are not included. Recording continues. A fourth person cannot be added or
+switched back on until someone is deactivated or the company pays.
+
+`20261028090000_remove_trial_and_case_studies.sql` removes the 14-day trial and case studies. Sign-up creates the free
+plan directly. Existing organisations were moved to Free, with at most 3 billed seats. Employee records were not
+deleted, and the history length already chosen on each company was left as it was.
+
+`20261029090000_plan_catalogue.sql` is the price and feature list: Free, Work Activity, Workforce, and Productivity.
+Prices are net of VAT. `20261030090000_billing_lifecycle.sql` is the monthly payment, the 7-day grace window,
+invoices, and the history rules. `20261031090000_grant_feature_check.sql` lets the team list ask who is working
+right now. Section 6 is how to take payment. The desktop app does not change for this. On Free it keeps recording,
+and it does not show who is online.
 
 `20261023090000_restrictions.sql` (apply after `20261022090000_report_templates.sql`) lets an alert rule restrict a
 program or a website. A restricted program is minimised by agent 2.6.3, with a short notice, while monitoring is on.
@@ -336,7 +376,7 @@ their MFA factor, after confirming their identity out of band.
       email jobs once section 7 is done).
 - [ ] Authentication: Site URL and `https://<domain>/auth/*` redirect set; "Confirm email" on; custom SMTP set.
 - [ ] Web app deployed (section 4) with HTTPS on your own domain.
-- [ ] Paystack live keys set, webhook URL configured, one real low-value payment tested end to end.
+- [ ] Yoco test key and webhook secret set, `payment.succeeded` webhook configured, one test payment confirmed by the webhook.
 - [ ] Resend domain verified; a test digest received (`kind: "digest"` request, see `schedule_emails.sql`).
 - [ ] Desktop agent built with a code-signing certificate; update host serving `manifest.json`; installed on a
       test PC with `install-machine.ps1` and checked: starts for a standard user, restarts when killed, updates.

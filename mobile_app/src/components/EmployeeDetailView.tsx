@@ -51,12 +51,19 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
     if (!isSelf) api.logAccess(id, 'viewed_employee', {});
   }, [id, isSelf]);
 
-  const status = useAsync(() => api.agentStatus(id), [id]);
+  const featureState = useAsync(() => api.features(), []);
+  const granted = featureState.data ?? [];
+  const showLive = isSelf || granted.includes('real_time_visibility');
+  const showPlaces = granted.includes('work_location_insights');
+  const showFiles = granted.includes('file_activity');
+
+  const status = useAsync(() => (showLive ? api.agentStatus(id) : Promise.resolve(null)), [id, showLive]);
   useEffect(() => {
+    if (!showLive) return;
     const t = setInterval(() => status.reload(), 20_000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, showLive]);
   const s = status.data;
   const online = !!s?.is_online;
 
@@ -64,13 +71,17 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
     <Screen refreshing={status.refreshing} onRefresh={status.refresh} padded={false}>
       <View style={local.header}>
         <Text style={local.name}>{employee.name}</Text>
-        <View style={[styles.row, { gap: 6 }]}>
-          <View style={[styles.dot, { backgroundColor: online && s ? stateColor[s.state] : colors.danger }]} />
-          <Text style={[local.status, { color: online && s ? stateColor[s.state] : colors.danger }]}>
-            {online && s ? `Online · ${stateLabel[s.state]}` : 'Offline'}
-          </Text>
-        </View>
-        {s ? <Text style={styles.hint}>Last activity: {formatRelative(s.last_seen_at)}</Text> : null}
+        {showLive && s ? (
+          <>
+            <View style={[styles.row, { gap: 6 }]}>
+              <View style={[styles.dot, { backgroundColor: online ? stateColor[s.state] : colors.danger }]} />
+              <Text style={[local.status, { color: online ? stateColor[s.state] : colors.danger }]}>
+                {online ? `Online · ${stateLabel[s.state]}` : 'Offline'}
+              </Text>
+            </View>
+            <Text style={styles.hint}>Last activity: {formatRelative(s.last_seen_at)}</Text>
+          </>
+        ) : null}
       </View>
 
       <View style={local.body}>
@@ -98,13 +109,16 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
 
         <InnerTabs tabs={TABS} value={tab} onChange={setTab} />
 
-        {tab === 'overview' ? <Overview id={id} timezone={timezone} today={today} status={status} /> : null}
-        {tab === 'activity' ? <ActivityTab id={id} timezone={timezone} today={today} status={status} /> : null}
+        {tab === 'overview' ? <Overview id={id} timezone={timezone} today={today} status={status} showLive={showLive} /> : null}
+        {tab === 'activity' ? <ActivityTab id={id} timezone={timezone} today={today} status={status} showLive={showLive} /> : null}
         {tab === 'apps' ? (
           <AppsWeb id={id} name={employee.name} timezone={timezone} today={today} period={period} setPeriod={setPeriod}
             project={project} setProject={setProject} canEditCategories={canManage} />
         ) : null}
-        {tab === 'history' ? <History id={id} name={employee.name} timezone={timezone} today={today} isSelf={isSelf} /> : null}
+        {tab === 'history' ? (
+          <History id={id} name={employee.name} timezone={timezone} today={today} isSelf={isSelf}
+            showPlaces={showPlaces} showFiles={showFiles} />
+        ) : null}
 
         <Text style={[styles.hint, { textAlign: 'center' }]}>
           Times shown in {timezone}.{!isSelf ? ' Viewing and exporting is recorded in the audit log.' : ''}
@@ -147,7 +161,9 @@ function Detail({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Overview({ id, timezone, today, status }: { id: string; timezone: string; today: string; status: StatusState }) {
+function Overview({ id, timezone, today, status, showLive }: {
+  id: string; timezone: string; today: string; status: StatusState; showLive: boolean;
+}) {
   const week = periodRange('this_week', today);
   const { data, error, loading, refresh } = useAsync(async () => {
     const [todayRows, weekRows] = await Promise.all([
@@ -163,7 +179,7 @@ function Overview({ id, timezone, today, status }: { id: string; timezone: strin
   const d = data?.day;
   return (
     <>
-      <LiveStatus status={status} />
+      {showLive ? <LiveStatus status={status} /> : null}
       {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
       {loading && !data ? <Loading /> : null}
       {data ? (
@@ -209,11 +225,13 @@ function Overview({ id, timezone, today, status }: { id: string; timezone: strin
   );
 }
 
-function ActivityTab({ id, timezone, today, status }: { id: string; timezone: string; today: string; status: StatusState }) {
+function ActivityTab({ id, timezone, today, status, showLive }: {
+  id: string; timezone: string; today: string; status: StatusState; showLive: boolean;
+}) {
   const { data, error, loading, refresh } = useAsync(() => api.timeline(id, today), [id, today]);
   return (
     <>
-      <LiveStatus status={status} />
+      {showLive ? <LiveStatus status={status} /> : null}
       {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
       {loading && !data ? <Loading /> : null}
       {data ? <Timeline rows={data} timezone={timezone} title="Today's timeline" /> : null}
@@ -298,7 +316,9 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setPro
   );
 }
 
-function History({ id, name, timezone, today, isSelf }: { id: string; name: string; timezone: string; today: string; isSelf: boolean }) {
+function History({ id, name, timezone, today, isSelf, showPlaces, showFiles }: {
+  id: string; name: string; timezone: string; today: string; isSelf: boolean; showPlaces: boolean; showFiles: boolean;
+}) {
   const from = addDays(today, -(HISTORY_DAYS - 1));
   const [exporting, setExporting] = useState(false);
   const { data, error, loading, refresh } = useAsync(() => api.dailyTotals(id, from, today), [id, from, today]);
@@ -342,8 +362,8 @@ function History({ id, name, timezone, today, isSelf }: { id: string; name: stri
       ) : null}
       <Button title="Export daily summaries (CSV)" variant="secondary" onPress={exportCsv} loading={exporting} disabled={!data} />
       <OfflineAnswers id={id} timezone={timezone} from={dayStartUtc(from, timezone)} to={dayStartUtc(addDays(today, 1), timezone)} />
-      <WorkPlaces id={id} from={from} to={today} />
-      <FileActivity id={id} timezone={timezone} isSelf={isSelf} />
+      {showPlaces ? <WorkPlaces id={id} from={from} to={today} /> : null}
+      {showFiles ? <FileActivity id={id} timezone={timezone} isSelf={isSelf} /> : null}
     </>
   );
 }

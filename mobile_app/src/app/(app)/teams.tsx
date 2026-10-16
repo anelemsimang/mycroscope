@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 
 import { Button, Card, Empty, ErrorBanner, Field, Loading, Screen, ToggleRow, styles } from '@/components/ui';
-import { api, errorMessage, type Feature, type Team, type TeamRow } from '@/lib/api';
+import { api, errorMessage, type Team, type TeamRow } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -11,7 +11,7 @@ export default function Teams() {
   const profile = useProfile();
   const { data, error, loading, refresh, reload } = useAsync(async () => {
     const [{ teams, managers }, people, features] = await Promise.all([api.teams(), api.teamOverview(), api.features()]);
-    return { teams, managers, people: people.filter((p) => p.is_active), workLocation: features.includes('work_location' as Feature) };
+    return { teams, managers, people: people.filter((p) => p.is_active), teamsAllowed: features.includes('teams'), workLocation: features.includes('work_location_insights') };
   }, []);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
@@ -19,6 +19,7 @@ export default function Teams() {
 
   if (profile.role !== 'owner') return <Screen><Card><Text style={styles.hint}>Only the owner can manage teams.</Text></Card></Screen>;
   if (loading && !data) return <Loading />;
+  if (data && !data.teamsAllowed) return <Screen />;
 
   async function run(fn: () => Promise<unknown>) {
     setFormError(null);

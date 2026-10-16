@@ -126,10 +126,13 @@ export function describeAudit(
         actor, title: 'Nightly clean-up deleted expired data',
         detail: `${str(d.segments)} activity record(s), ${str(d.events)} event(s), ${str(d.sessions)} session(s), ${str(d.summaries)} daily total(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}${d.work_location_days ? `, ${str(d.work_location_days)} office/remote day(s)` : ''} older than the retention period`,
       };
-    case 'payment_received':
-      return { actor, title: 'Payment received', detail: `${str(d.seats)} seats × ${str(d.months)} month(s) · reference ${str(d.reference)}` };
+    case 'payment_received': {
+      const months = Number(d.months);
+      const span = months === 12 ? 'one year' : `${str(d.months)} month(s)`;
+      return { actor, title: 'Payment received', detail: `${str(d.seats)} people for ${span} · reference ${str(d.reference)}` };
+    }
     case 'subscription_changed_by_provider':
-      return { actor, title: 'Subscription changed by Mycroscope', detail: [str(d.plan), str(d.status), d.seats ? `${str(d.seats)} seats` : '', str(d.note)].filter(Boolean).join(' · ') };
+      return { actor, title: 'Subscription changed by Mycroscope', detail: [str(d.plan), str(d.status), d.seats ? `${str(d.seats)} people` : '', str(d.note)].filter(Boolean).join(' · ') };
     case 'support_access_used':
       return { actor, title: 'Mycroscope support opened the technical status view', detail: '' };
     case 'case_study_started':

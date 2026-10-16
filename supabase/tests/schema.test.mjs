@@ -28,8 +28,14 @@ const SUPABASE_STUB = `
   );
   create function auth.uid() returns uuid language sql stable as
     $$ select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid $$;
-  grant usage on schema auth to anon, authenticated;
-  grant execute on function auth.uid() to anon, authenticated;
+  create function auth.jwt() returns jsonb language sql stable as
+    $$ select nullif(current_setting('request.jwt.claims', true), '')::jsonb $$;
+  create function auth.role() returns text language sql stable as
+    $$ select nullif(current_setting('request.jwt.claim.role', true), '') $$;
+  grant usage on schema auth to anon, authenticated, service_role;
+  grant execute on function auth.uid() to anon, authenticated, service_role;
+  grant execute on function auth.jwt() to anon, authenticated, service_role;
+  grant execute on function auth.role() to anon, authenticated, service_role;
   grant usage on schema public to anon, authenticated;
   alter default privileges in schema public grant all on tables to anon, authenticated;
   alter default privileges in schema public grant all on sequences to anon, authenticated;
@@ -42,7 +48,8 @@ let db;
 async function asRole(role, uid, fn, aal = 'aal1') {
   await db.exec(`set role ${role}`);
   await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [uid ?? '']);
-  await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: uid, aal })]);
+  await db.query(`select set_config('request.jwt.claim.role', $1, false)`, [role]);
+  await db.query(`select set_config('request.jwt.claims', $1, false)`, [JSON.stringify({ sub: uid, aal, role })]);
   try {
     return await fn();
   } finally {
@@ -260,8 +267,8 @@ test('employees see only themselves; managers see their team', async () => {
   const overview = await asUser(ctx.ownerAuth, 'select * from get_team_overview()');
   const sipho = overview.rows.find((r) => r.employee_id === ctx.empId);
   assert.ok(sipho);
-  assert.equal(sipho.is_online, true);
-  assert.equal(sipho.current_app, 'Microsoft Excel');
+  assert.equal(sipho.is_online, false, 'the free plan does not show who is working right now');
+  assert.equal(sipho.current_app, null);
   assert.ok(Number(sipho.active_seconds) >= 400, `expected today's active time, got ${sipho.active_seconds}`);
   assert.equal(sipho.needs_acknowledgement, false);
 });
@@ -298,6 +305,7 @@ const LAPTOP_POLICY = {
 };
 
 test('saving settings and the Information Officer together publishes one notice version', async () => {
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
   const before = await asUser(ctx.ownerAuth, 'select max(version)::int as v from monitoring_policies');
   const saved = await asUser(ctx.ownerAuth, COMPLIANCE_SQL,
     settingsArgs(LAPTOP_POLICY, 'Lerato Officer', 'privacy@acme.co.za'));
@@ -315,6 +323,8 @@ test('saving settings and the Information Officer together publishes one notice 
   const again = await asUser(ctx.ownerAuth, COMPLIANCE_SQL,
     settingsArgs(LAPTOP_POLICY, 'Lerato Officer', 'privacy@acme.co.za'));
   assert.equal(again.rows[0].version, saved.rows[0].version, 'saving without changes must not publish');
+  await db.query('update organization_settings set retention_days = 30 where organization_id = $1', [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'free' where organization_id = $1`, [ctx.orgId]);
 });
 
 test('compliance settings are validated and limited to managers', async () => {
@@ -403,14 +413,14 @@ test('nightly maintenance builds summaries and purges expired data', async () =>
 // ---------------------------------------------------------------------------
 // SaaS platform
 // ---------------------------------------------------------------------------
-test('new organisations start a 14-day trial with seat counts', async () => {
+test('new organisations start on the free plan', async () => {
   const s = await asUser(ctx.ownerAuth, 'select * from get_my_service_status()');
   assert.equal(s.rows[0].level, 'full');
-  assert.equal(s.rows[0].status, 'trialing');
-  assert.equal(s.rows[0].seats, 25);
+  assert.equal(s.rows[0].status, 'active');
+  assert.equal(s.rows[0].plan, 'free');
+  assert.equal(s.rows[0].seats, 3);
   assert.equal(s.rows[0].seats_used, 3);
-  const days = (new Date(s.rows[0].trial_ends_at) - Date.now()) / 86_400_000;
-  assert.ok(days > 13.9 && days <= 14.01);
+  assert.equal(s.rows[0].seat_cap, 3);
   await rejects(asUser(ctx.ownerAuth, 'update subscriptions set seats = 999'), /permission denied/);
   const empView = await asUser(ctx.empAuth, 'select count(*)::int as n from subscriptions');
   assert.equal(empView.rows[0].n, 0, 'employees must not see billing');
@@ -418,25 +428,28 @@ test('new organisations start a 14-day trial with seat counts', async () => {
 
 test('seat limits block new employees and reactivation', async () => {
   await db.query('update subscriptions set seats = 3 where organization_id = $1', [ctx.orgId]);
-  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Extra', 'extra@acme.co.za')`), /seats on your plan/);
+  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Extra', 'extra@acme.co.za')`), /includes 3 people/);
   await db.query('update subscriptions set seats = 25 where organization_id = $1', [ctx.orgId]);
 });
 
-test('an expired trial becomes the free plan and keeps recording', async () => {
-  await db.query(`update subscriptions set trial_ends_at = now() - interval '1 hour' where organization_id = $1`, [ctx.orgId]);
-  const s = await asUser(ctx.ownerAuth, 'select level from get_my_service_status()');
+test('the free plan keeps recording, and a paid plan stays up through the grace window', async () => {
+  const s = await asUser(ctx.ownerAuth, 'select level, plan from get_my_service_status()');
   assert.equal(s.rows[0].level, 'full');
+  assert.equal(s.rows[0].plan, 'free');
   assert.deepEqual((await asUser(ctx.ownerAuth, 'select get_my_features() as f')).rows[0].f, []);
   await insertSegment(ctx.empAuth, segment({ start: minutesAgo(20), end: minutesAgo(19) }));
-  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Late', 'late@acme.co.za')`), /free plan includes 3 people/);
+  await rejects(asUser(ctx.ownerAuth, `select * from create_employee('Late', 'late@acme.co.za')`), /includes 3 people/);
   const still = await asUser(ctx.ownerAuth, 'select count(*)::int as n from activity_segments');
   assert.ok(still.rows[0].n > 0, 'existing data stays readable');
 
-  await db.query(`update subscriptions set status = 'active', current_period_end = now() - interval '3 days'
-                  where organization_id = $1`, [ctx.orgId]);
-  const grace = await asUser(ctx.ownerAuth, 'select level, grace_until from get_my_service_status()');
-  assert.equal(grace.rows[0].level, 'full', 'paid organisations keep working during the grace period');
+  await db.query(`update subscriptions set plan = 'work_activity', status = 'active',
+                  current_period_end = now() - interval '3 days' where organization_id = $1`, [ctx.orgId]);
+  const grace = await asUser(ctx.ownerAuth, 'select level, status, grace_until from get_my_service_status()');
+  assert.equal(grace.rows[0].status, 'past_due');
+  assert.equal(grace.rows[0].level, 'full', 'a paid plan keeps working during the grace window');
   await insertSegment(ctx.empAuth, segment({ start: minutesAgo(9), end: minutesAgo(8) }));
+  await db.query(`update subscriptions set plan = 'free', status = 'active', current_period_end = null
+                  where organization_id = $1`, [ctx.orgId]);
 });
 
 test('working hours appear in the notice and is_work_time handles overnight shifts', async () => {
@@ -478,6 +491,7 @@ test('requiring two-factor login limits managers without it, without a new notic
 });
 
 test('team managers see only their teams', async () => {
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
   const team = await asUser(ctx.ownerAuth, `select id from save_team(null, 'Dispatch')`);
   ctx.teamId = team.rows[0].id;
   await asUser(ctx.ownerAuth, 'select set_team_managers($1, $2)', [ctx.teamId, [ctx.mgrId]]);
@@ -548,9 +562,9 @@ test('operators manage subscriptions but need customer approval for support acce
   const seen = await asUser2fa(ctx.opAuth, 'select count(*)::int as n from activity_segments');
   assert.equal(seen.rows[0].n, 0, 'operators cannot read activity');
 
-  await rejects(asUser2fa(ctx.opAuth, `select op_update_subscription($1, 'standard', 'active', 30, null, now() + interval '30 days', '')`,
+  await rejects(asUser2fa(ctx.opAuth, `select op_update_subscription($1, 'work_activity', 'active', 30, now() + interval '30 days', '')`,
     [ctx.orgId]), /note/);
-  await asUser2fa(ctx.opAuth, `select op_update_subscription($1, 'standard', 'active', 30, null, now() + interval '30 days', 'Paid by EFT')`,
+  await asUser2fa(ctx.opAuth, `select op_update_subscription($1, 'work_activity', 'active', 30, now() + interval '30 days', 'Paid by EFT')`,
     [ctx.orgId]);
   const customerAudit = await asUser(ctx.ownerAuth, `select details from audit_log where action = 'subscription_changed_by_provider'`);
   assert.equal(customerAudit.rows[0].details.note, 'Paid by EFT');
@@ -574,7 +588,7 @@ test('operators manage subscriptions but need customer approval for support acce
 test('operators can delete only cancelled organisations, with the name typed', async () => {
   const otherOrg = (await db.query(`select id from organizations where name = 'Other Co'`)).rows[0].id;
   await rejects(asUser2fa(ctx.opAuth, `select op_delete_organization($1, 'Other Co')`, [otherOrg]), /Only cancelled/);
-  await asUser2fa(ctx.opAuth, `select op_update_subscription($1, null, 'cancelled', null, null, null, 'Customer left')`, [otherOrg]);
+  await asUser2fa(ctx.opAuth, `select op_update_subscription($1, null, 'cancelled', null, null, 'Customer left')`, [otherOrg]);
   await rejects(asUser2fa(ctx.opAuth, `select op_delete_organization($1, 'other co')`, [otherOrg]), /exactly/);
   await asUser2fa(ctx.opAuth, `select op_delete_organization($1, 'Other Co')`, [otherOrg]);
   const gone = await db.query('select count(*)::int as n from organizations where id = $1', [otherOrg]);
@@ -584,14 +598,14 @@ test('operators can delete only cancelled organisations, with the name typed', a
 });
 
 test('payments apply once and extend the paid period', async () => {
-  await db.query(`update subscriptions set status = 'trialing', plan = 'trial', current_period_end = null where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set status = 'active', plan = 'free', current_period_end = null where organization_id = $1`, [ctx.orgId]);
   const pay = (ref) => asRole('service_role', null, () => db.query(
     `select apply_payment($1, $2, 297000, 'ZAR', 30, 1, 'CUS_x', '{}') as applied`, [ctx.orgId, ref]));
   assert.equal((await pay('ref-1')).rows[0].applied, true);
   assert.equal((await pay('ref-1')).rows[0].applied, false, 'a retried webhook must not extend twice');
   const sub = await db.query('select status, plan, seats, current_period_end from subscriptions where organization_id = $1', [ctx.orgId]);
   assert.equal(sub.rows[0].status, 'active');
-  assert.equal(sub.rows[0].plan, 'standard');
+  assert.equal(sub.rows[0].plan, 'work_activity');
   assert.equal(sub.rows[0].seats, 30);
   const days = (new Date(sub.rows[0].current_period_end) - Date.now()) / 86_400_000;
   assert.ok(days > 27 && days < 32);
@@ -608,42 +622,41 @@ test('payments apply once and extend the paid period', async () => {
   assert.equal(audit.rows[0].n, 2);
 });
 
-test('case studies: free for the agreed months, then the 14-day trial', async () => {
-  const op = (sql, params = []) => asUser2fa(ctx.opAuth, sql, params);
-  const days = (iso) => (new Date(iso) - Date.now()) / 86_400_000;
-  await rejects(asUser2fa(ctx.ownerAuth, `select op_invite_case_study('pilot@study.co.za', 12, 'Pilot')`), /Not allowed/);
-  await rejects(op(`select op_invite_case_study('owner@acme.co.za', 12, 'Pilot')`), /already registered/);
-  await rejects(op(`select op_invite_case_study('pilot@study.co.za', 30, 'Pilot')`), /between 1 and 24/);
-  await rejects(op(`select op_invite_case_study('pilot@study.co.za', 12, ' ')`), /note/);
-  await op(`select op_invite_case_study(' Pilot@Study.co.za ', 12, '2027 case study')`);
-  assert.equal((await op('select count(*)::int as n from op_case_study_invites()')).rows[0].n, 1);
+test('plans are cumulative, and a downgrade hides history without deleting it', async () => {
+  const features = async () => (await asUser(ctx.ownerAuth, 'select get_my_features() as f')).rows[0].f.sort();
+  await db.query(`update subscriptions set plan = 'free', status = 'active', current_period_end = null where organization_id = $1`, [ctx.orgId]);
+  assert.deepEqual(await features(), []);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
+  assert.ok((await features()).includes('time_tracking'));
+  assert.ok(!(await features()).includes('productivity_goals'));
+  await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)'), /not included in your plan/);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
+  assert.ok((await features()).includes('productivity_goals'));
+  assert.ok((await features()).includes('time_tracking'));
+  assert.ok(!(await features()).includes('coaching'));
 
-  const pilotAuth = await signUp('pilot@study.co.za', {
-    signup_type: 'owner', organization_name: 'Pilot Study Co', full_name: 'Pat Pilot' });
-  const status = (await asUser(pilotAuth, 'select * from get_my_service_status()')).rows[0];
-  assert.equal(status.status, 'trialing');
-  assert.equal(status.level, 'full');
-  assert.ok(days(status.case_study_until) > 360 && days(status.case_study_until) < 370);
-  assert.equal(Math.round((new Date(status.trial_ends_at) - new Date(status.case_study_until)) / 86_400_000), 14,
-    'the normal 14-day trial follows the case study');
-  assert.equal((await op('select count(*)::int as n from op_case_study_invites()')).rows[0].n, 0, 'the invite is used up');
-  const pilotOrg = (await asUser(pilotAuth, 'select organization_id from employees')).rows[0].organization_id;
-  const seen = await op('select case_study_until from op_organizations() where organization_id = $1', [pilotOrg]);
-  assert.ok(seen.rows[0].case_study_until);
-
-  const ended = (await op(`select * from op_set_case_study($1, 0, 'Pilot finished early')`, [pilotOrg])).rows[0];
-  assert.ok(days(ended.trial_ends_at) > 13 && days(ended.trial_ends_at) < 15);
-  await rejects(op(`select op_set_case_study($1, 0, 'again')`, [pilotOrg]), /No case study/);
-  const restarted = (await op(`select * from op_set_case_study($1, 6, 'Extended')`, [pilotOrg])).rows[0];
-  assert.ok(days(restarted.case_study_until) > 175);
-  await rejects(op(`select op_set_case_study($1, 12, 'x')`, [ctx.orgId]), /paying customer/);
-
-  const audit = await op(`select action from op_operator_audit(50) where action like 'case_study%'`);
-  assert.ok(audit.rows.length >= 4);
-  const customerAudit = await asUser(pilotAuth, `select count(*)::int as n from audit_log where action like 'case_study%'`);
-  assert.equal(customerAudit.rows[0].n, 3, 'the customer can see when the provider changed their case study');
-  await rejects(asUser(pilotAuth, 'select * from case_study_invites'), /permission denied/);
-  await rejects(asUser(pilotAuth, `select start_case_study($1, 24)`, [pilotOrg]), /permission denied/);
+  const keptRetention = (await db.query(
+    'select retention_days from organization_settings where organization_id = $1', [ctx.orgId])).rows[0].retention_days;
+  await db.query(`update subscriptions set plan = 'productivity' where organization_id = $1`, [ctx.orgId]);
+  await db.query('update organization_settings set retention_days = 90 where organization_id = $1', [ctx.orgId]);
+  const oldId = randomUUID();
+  await db.query(
+    `insert into activity_segments (id, organization_id, employee_id, device_id, state, started_at, ended_at, app_name, updated_at)
+     values ($1, $2, $3, $4, 'active', now() - interval '40 days', now() - interval '40 days' + interval '10 minutes', 'Hidden', now())`,
+    [oldId, ctx.orgId, ctx.empId, ctx.deviceId]);
+  await db.query(`update subscriptions set plan = 'free' where organization_id = $1`, [ctx.orgId]);
+  const hidden = await asUser(ctx.ownerAuth, `select count(*)::int as n from activity_segments where id = $1`, [oldId]);
+  assert.equal(hidden.rows[0].n, 0, 'the free plan does not show activity older than 30 days');
+  const kept = await db.query(`select count(*)::int as n from activity_segments where id = $1`, [oldId]);
+  assert.equal(kept.rows[0].n, 1, 'the row stays, so a later upgrade can show it again');
+  await db.query('select purge_expired_data()');
+  const afterPurge = await db.query(`select count(*)::int as n from activity_segments where id = $1`, [oldId]);
+  assert.equal(afterPurge.rows[0].n, 1, 'nightly deletion waits for the longer of the company limit and the longest plan');
+  await db.query('delete from activity_segments where id = $1', [oldId]);
+  await db.query('update organization_settings set retention_days = $2 where organization_id = $1', [ctx.orgId, keptRetention]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
+  await rejects(asAnon('select get_my_features()'), /permission denied/);
+  await rejects(asUser(ctx.ownerAuth, `select org_has_feature($1, 'goals')`, [ctx.orgId]), /permission denied/);
 });
 
 test('email batches follow team scope and preferences, and only the service role can run them', async () => {
@@ -741,13 +754,14 @@ test('a PC used while nobody is signed in alerts managers, using only the per-PC
   await rejects(asUser(ctx.ownerAuth, 'select * from device_report_keys'), /permission denied/);
 });
 
-test('plans decide which features an organisation gets; trials get everything', async () => {
+test('plans decide which features an organisation gets', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
   const features = async () => (await asUser(ctx.ownerAuth, 'select get_my_features() as f')).rows[0].f;
-  await db.query(`update subscriptions set plan = 'trial' where organization_id = $1`, [ctx.orgId]);
-  assert.ok((await features()).includes('goals'));
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
-  assert.deepEqual(await features(), ['team_categories', 'team_schedules', 'trends', 'alert_rules', 'channels', 'work_location']);
+  await db.query(`update subscriptions set plan = 'free' where organization_id = $1`, [ctx.orgId]);
+  assert.deepEqual(await features(), []);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
+  assert.ok((await features()).includes('channels'));
+  assert.ok(!(await features()).includes('goals'));
   await rejects(asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)'), /not included in your plan/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
   await rejects(asAnon('select get_my_features()'), /permission denied/);
@@ -858,7 +872,7 @@ test('working hours per team or person: notice, policy snapshot and alerts', asy
 
 test('productivity goals per company or team, limited to the right managers', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
   await asUser(ctx.ownerAuth, 'select save_goal(null, 6, 80, 120)');
   await rejects(asUser(ctx.mgrAuth, 'select save_goal(null, 5, 80, 120)'), /Not allowed/, 'team managers cannot set the company goal');
   await asUser(ctx.mgrAuth, 'select save_goal($1, 5.5, 70, 130)', [ctx.teamId]);
@@ -883,7 +897,7 @@ test('productivity goals per company or team, limited to the right managers', as
 
 test('analytics: trends, workload, capacity and software usage', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'productivity' where organization_id = $1`, [ctx.orgId]);
   await asUser(ctx.ownerAuth, `select set_app_category('domain', 'facebook.com', 'unproductive')`);
   const device = randomUUID();
   await db.query('insert into devices (id, organization_id, employee_id, hostname) values ($1, $2, $3, $4)',
@@ -957,15 +971,15 @@ test('analytics: trends, workload, capacity and software usage', async () => {
   await rejects(asAnon(`select * from get_trend('2026-10-05', '2026-10-11')`), /permission denied/);
   await rejects(asUser(ctx.ownerAuth, `select * from get_trend('2025-01-01', '2026-10-11')`), /at most 400 days/);
   await rejects(asUser(ctx.ownerAuth, `select * from person_days($1, null, null, '2026-10-06', '2026-10-06')`, [ctx.orgId]), /permission denied/);
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
-  await asUser(ctx.ownerAuth, `select * from get_trend('2026-10-05', '2026-10-11')`);
-  await rejects(asUser(ctx.ownerAuth, `select * from get_workload('2026-10-05', '2026-10-11')`), /not included in your plan/);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
+  await rejects(asUser(ctx.ownerAuth, `select * from get_trend('2026-10-05', '2026-10-11')`), /Upgrade to unlock/);
+  await rejects(asUser(ctx.ownerAuth, `select * from get_workload('2026-10-05', '2026-10-11')`), /Upgrade to unlock/);
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 
 test('alert rules raise policy alarms from incoming activity', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
   await rejects(asUser(ctx.mgrAuth, `select save_alert_rule(null, 'X', 'domain', 'x.com', 'low', false, true)`), /Not allowed/);
   await rejects(asUser(ctx.empAuth, `select add_alert_rule_pack('file_sharing')`), /Not allowed/);
 
@@ -1028,9 +1042,9 @@ test('file activity: plan, notice, uploads, audited viewing, alerts and retentio
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
   const save = (uid, settings) => asUser(uid, `select version from save_compliance_settings($1, 'Thandi Owner', 'privacy@acme.co.za')`,
     [JSON.stringify(settings)]);
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
   await rejects(save(ctx.ownerAuth, { detect_removable_media: true }), /not included in your plan/);
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
 
   const device = (await db.query(`select id from devices where hostname = 'LAPTOP-04'`)).rows[0].id;
   const upload = (row) => asUser(ctx.empAuth,
@@ -1102,7 +1116,7 @@ test('file activity: plan, notice, uploads, audited viewing, alerts and retentio
 
 test('Slack, Teams and webhook channels; read-only API keys', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'productivity' where organization_id = $1`, [ctx.orgId]);
   const svc = (sql, params = []) => asRole('service_role', null, () => db.query(sql, params));
   const add = (uid, kind, url, sev = 'medium') =>
     asUser(uid, `select * from add_notification_channel($1, $2, $3, $4)`, [kind, `${kind} alerts`, url, sev]);
@@ -1158,10 +1172,10 @@ test('Slack, Teams and webhook channels; read-only API keys', async () => {
   await rejects(svc(`select * from api_usage($1, '2026-01-01', '2026-10-06')`, [ctx.orgId]), /at most 93 days/);
   assert.ok((await svc(`select count(*)::int as n from api_employees($1)`, [ctx.orgId])).rows[0].n >= 3);
 
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
   assert.equal((await svc('select api_authenticate($1) as org', [key.api_key])).rows[0].org, null, 'the plan must include the API');
   await rejects(asUser(ctx.ownerAuth, `select * from create_api_key('Excel')`), /not included in your plan/);
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
   await asUser(ctx.ownerAuth, 'select revoke_api_key($1)', [key.id]);
   assert.equal((await svc('select api_authenticate($1) as org', [key.api_key])).rows[0].org, null, 'revoked keys stop working');
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
@@ -1176,7 +1190,7 @@ test('time away from the computer: notice, answers, reports and deletion', async
      values ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [randomUUID(), ctx.orgId, ctx.empId, ctx.deviceId, row.start, row.end, row.reason, row.note ?? null]);
 
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
   await rejects(upload({ start: minutesAgo(40), end: minutesAgo(10), reason: 'meeting' }), /row-level security/,
     'nothing is accepted while the question is off');
   await save({ ask_offline_reason: true, offline_prompt_minutes: 10, productive_offline_reasons: ['meeting', 'call'] });
@@ -1230,7 +1244,7 @@ test('time away from the computer: notice, answers, reports and deletion', async
     [ctx.empId, ctx.projectId])).rows[0];
   assert.equal(Number(byProject.meeting), 0, 'a project report leaves time away out');
 
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'productivity' where organization_id = $1`, [ctx.orgId]);
   const from = `(now() at time zone 'Africa/Johannesburg')::date - 1`;
   const to = `(now() at time zone 'Africa/Johannesburg')::date`;
   const trend = (await asUser(ctx.ownerAuth, `select
@@ -1265,7 +1279,7 @@ test('time away from the computer: notice, answers, reports and deletion', async
 
 test('office and remote days: notice, one result per day, and the weekly target', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
   const save = (settings) => asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)', [JSON.stringify(settings)]);
 
   await rejects(asUser(ctx.mgrAuth,
@@ -1335,10 +1349,10 @@ test('office and remote days: notice, one result per day, and the weekly target'
 
 test('AI tools: operator list, adoption, and an alert when a tool is not approved', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
   const chatgpt = (await db.query(`select id from ai_tools where name = 'ChatGPT'`)).rows[0].id;
   await rejects(asUser(ctx.ownerAuth, `select set_ai_tool_approval($1, 'unapproved')`, [chatgpt]), /not included/);
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'workforce' where organization_id = $1`, [ctx.orgId]);
   await rejects(asUser(ctx.mgrAuth, `select set_ai_tool_approval($1, 'unapproved')`, [chatgpt]), /Not allowed/);
   await rejects(asUser(ctx.ownerAuth,
     `select op_save_ai_tool(null, 'TestAI', array['testai.example'], array[]::text[], true)`), /Not allowed/);
@@ -1389,10 +1403,10 @@ test('AI tools: operator list, adoption, and an alert when a tool is not approve
 
 test('written advice: off until switched on, and the weekly pack hides names', async () => {
   const plan = (await db.query('select plan from subscriptions where organization_id = $1', [ctx.orgId])).rows[0].plan;
-  await db.query(`update subscriptions set plan = 'standard' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'work_activity' where organization_id = $1`, [ctx.orgId]);
   await rejects(asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
     [JSON.stringify({ advisor_enabled: true })]), /not included/);
-  await db.query(`update subscriptions set plan = 'business' where organization_id = $1`, [ctx.orgId]);
+  await db.query(`update subscriptions set plan = 'productivity' where organization_id = $1`, [ctx.orgId]);
   await asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
     [JSON.stringify({ advisor_enabled: true })]);
   const notice = (await asUser(ctx.empAuth, 'select notice_text from get_my_policy_status()')).rows[0];
@@ -1436,40 +1450,34 @@ test('written advice: off until switched on, and the weekly pack hides names', a
   await db.query('update subscriptions set plan = $2 where organization_id = $1', [ctx.orgId, plan]);
 });
 
-test('the nightly job records an ended trial as the free plan, and payment moves it to Standard', async () => {
+test('a missed renewal moves the company to Free, and payment opens the first paid plan', async () => {
   const before = (await db.query(
-    'select plan, status, seats, trial_ends_at, current_period_end from subscriptions where organization_id = $1',
+    'select plan, status, seats, current_period_end from subscriptions where organization_id = $1',
     [ctx.orgId])).rows[0];
   const retention = (await db.query(
     'select retention_days from organization_settings where organization_id = $1', [ctx.orgId])).rows[0].retention_days;
-  await db.query(`update subscriptions set plan = 'trial', status = 'trialing', seats = 25,
-      trial_ends_at = now() + interval '1 day', current_period_end = null where organization_id = $1`, [ctx.orgId]);
-  await db.query('update organization_settings set retention_days = 90 where organization_id = $1', [ctx.orgId]);
-  const extra = (await asUser(ctx.ownerAuth, `select employee_id from create_employee('Extra Free', 'extra-free@acme.co.za')`)).rows[0];
-  await db.query('update employees set is_active = false where id = $1', [extra.employee_id]);
-  await db.query(`update subscriptions set trial_ends_at = now() - interval '1 hour' where organization_id = $1`, [ctx.orgId]);
-  const n = (await db.query('select convert_expired_trials() as n')).rows[0].n;
-  assert.ok(Number(n) >= 1);
-  const after = (await db.query('select plan, status, seats from subscriptions where organization_id = $1', [ctx.orgId])).rows[0];
-  assert.equal(after.plan, 'free');
-  assert.equal(after.status, 'active');
-  assert.equal(after.seats, 3);
-  assert.equal((await db.query('select retention_days from organization_settings where organization_id = $1',
-    [ctx.orgId])).rows[0].retention_days, 30);
+  await db.query(`update subscriptions set plan = 'free', status = 'active', current_period_end = null
+      where organization_id = $1`, [ctx.orgId]);
   await rejects(asUser(ctx.ownerAuth, 'select save_compliance_settings($1, null, null)',
     [JSON.stringify({ retention_days: 90 })]), /30 days/);
-  await rejects(asUser(ctx.ownerAuth, 'select update_employee($1, null, null, true)', [extra.employee_id]),
-    /free plan includes 3 people/);
-  await asUser(ctx.ownerAuth, `select delete_employee($1, 'test cleanup')`, [extra.employee_id]);
+  const extra = (await db.query(
+    `update subscriptions set plan = 'workforce' where organization_id = $1 returning organization_id`, [ctx.orgId])).rows[0];
+  assert.ok(extra.organization_id);
+  const added = (await asUser(ctx.ownerAuth, `select employee_id from create_employee('Extra Free', 'extra-free@acme.co.za')`)).rows[0];
+  await db.query(`update subscriptions set plan = 'free', status = 'active' where organization_id = $1`, [ctx.orgId]);
+  await db.query('update employees set is_active = false where id = $1', [added.employee_id]);
+  await rejects(asUser(ctx.ownerAuth, 'select update_employee($1, null, null, true)', [added.employee_id]),
+    /includes 3 people/);
+  await asUser(ctx.ownerAuth, `select delete_employee($1, 'test cleanup')`, [added.employee_id]);
   assert.equal((await db.query(
     `select apply_payment($1, 'free-upgrade-test', 100, 'ZAR', 5, 1, null, '{}'::jsonb) as ok`, [ctx.orgId])).rows[0].ok, true);
   const paid = (await db.query('select plan, seats from subscriptions where organization_id = $1', [ctx.orgId])).rows[0];
-  assert.equal(paid.plan, 'standard');
+  assert.equal(paid.plan, 'work_activity');
   assert.equal(paid.seats, 5);
 
-  await db.query(`update subscriptions set plan = $2, status = $3, seats = $4, trial_ends_at = $5, current_period_end = $6
+  await db.query(`update subscriptions set plan = $2, status = $3, seats = $4, current_period_end = $5
       where organization_id = $1`,
-    [ctx.orgId, before.plan, before.status, before.seats, before.trial_ends_at, before.current_period_end]);
+    [ctx.orgId, before.plan, before.status, before.seats, before.current_period_end]);
   await db.query('update organization_settings set retention_days = $2 where organization_id = $1', [ctx.orgId, retention]);
   await db.query(`delete from payments where reference = 'free-upgrade-test'`);
   await db.query(`delete from audit_log where organization_id = $1 and action = 'payment_received'

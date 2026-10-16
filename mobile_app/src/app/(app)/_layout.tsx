@@ -13,9 +13,11 @@ function goToDashboard() {
   else router.replace('/');
 }
 
-function HeaderLink({ label, side }: { label: string; side: 'left' | 'right' }) {
+function HeaderLink({ label, side, onPress, accessibilityLabel }: {
+  label: string; side: 'left' | 'right'; onPress: () => void; accessibilityLabel: string;
+}) {
   return (
-    <Pressable hitSlop={8} onPress={goToDashboard} accessibilityRole="button" accessibilityLabel="Back to all employees"
+    <Pressable hitSlop={8} onPress={onPress} accessibilityRole="button" accessibilityLabel={accessibilityLabel}
       style={({ pressed }) => [
         side === 'left' ? { paddingRight: 12 } : { paddingHorizontal: 12, paddingVertical: 6, marginRight: 8,
           borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)', borderRadius: 6 },
@@ -57,8 +59,16 @@ export default function AppLayout() {
 
   const inner = (title: string) => ({ navigation }: { navigation: { canGoBack: () => boolean } }) => ({
     title,
-    ...(isManager && wide ? { headerRight: () => <HeaderLink side="right" label="☰ All employees" /> } : {}),
-    ...(!navigation.canGoBack() && !(isManager && wide) ? { headerLeft: () => <HeaderLink side="left" label={isManager ? '‹ Dashboard' : '‹ My Activity'} /> } : {}),
+    headerBackVisible: false,
+    headerLeft: () => (
+      <HeaderLink side="left" label="‹ Back" accessibilityLabel="Back"
+        onPress={() => (navigation.canGoBack() ? router.back() : goToDashboard())} />
+    ),
+    ...(isManager && wide ? {
+      headerRight: () => (
+        <HeaderLink side="right" label="☰ All employees" accessibilityLabel="Back to all employees" onPress={goToDashboard} />
+      ),
+    } : {}),
   });
 
   return (
@@ -83,6 +93,10 @@ export default function AppLayout() {
         <Stack.Screen name="goals" options={inner('Productivity Goals')} />
         <Stack.Screen name="insights" options={inner('Insights')} />
         <Stack.Screen name="billing" options={inner('Subscription & Billing')} />
+        <Stack.Screen name="purchase" options={inner('Get plan')} />
+        <Stack.Screen name="purchase-received" options={inner('Payment sent')} />
+        <Stack.Screen name="purchase-cancelled" options={inner('Payment cancelled')} />
+        <Stack.Screen name="purchase-failed" options={inner('Payment failed')} />
         <Stack.Screen name="install-key" options={inner('Agent Install Key')} />
         <Stack.Screen name="support-access" options={inner('Support Access')} />
       </Stack.Protected>

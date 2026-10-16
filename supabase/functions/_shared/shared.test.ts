@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import {
   quote, safeReturnUrl, signTerms, termsFromTransaction, verifyPaystackSignature, verifyTerms,
 } from './billing.ts';
-import { pseudonymize, restoreNames, scrubQuestion, writeReport } from './advisor.ts';
+import { pseudonymize, restoreNames, scrubQuestion, writeAllReports, writeReport } from './advisor.ts';
 import { clientAddress, isPublicAddress } from './ip.ts';
 import { renderAlert, renderDigest } from './email.ts';
 import {
@@ -216,6 +216,28 @@ test('a report is written from the figures, and leaves out anyone with no time',
   assert.match(text, /112% of the goal/);
   assert.doesNotMatch(text, /Ann Botha/);
   assert.doesNotMatch(text, /salary|pay/i);
+});
+
+test('a full report writes every section from the same figures', () => {
+  const sections = writeAllReports({
+    scope: 'Dispatch',
+    from: '2026-10-05',
+    to: '2026-10-11',
+    personDays: 5,
+    productiveHours: 31,
+    awayHours: 0,
+    trend: [{ productiveHours: 10, awayHours: 0 }, { productiveHours: 21, awayHours: 0 }],
+    software: [{ name: 'Excel', users: 2, hours: 20 }],
+    capacity: [{ team: 'Dispatch', people: 2, avgHours: 6, gapHours: 1 }],
+    workload: [
+      { name: 'Sipho Dlamini', days: 5, productiveHours: 31, utilisation: 112, status: 'over' },
+    ],
+  });
+  assert.deepEqual(sections.map((section) => section.title), [
+    'Week in review', 'Workload', 'Where time went', 'Capacity', 'How the period changed',
+  ]);
+  assert.ok(sections.every((section) => section.answer.includes('Dispatch')));
+  assert.match(sections[1].answer, /Sipho Dlamini/);
 });
 
 test('an empty period says there is not enough activity', () => {

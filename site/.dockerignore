@@ -1,0 +1,6 @@
+Dockerfile
+.dockerignore
+netlify.toml
+inbox
+.git
+*.md

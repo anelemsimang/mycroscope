@@ -27,7 +27,7 @@ export default function AlertRules() {
   const profile = useProfile();
   const { data, error, loading, refresh, reload } = useAsync(async () => {
     const [rules, features, { teams, managers }] = await Promise.all([api.alertRules(), api.features(), api.teams()]);
-    return { rules, allowed: features.includes('alert_rules'), canEdit: manageableTeams(teams, managers, profile).orgWide };
+    return { rules, allowed: features.includes('website_tracking'), canEdit: manageableTeams(teams, managers, profile).orgWide };
   }, [profile.employeeId]);
   const [editing, setEditing] = useState<Draft | null>(null);
   const [busyPack, setBusyPack] = useState<RulePack | null>(null);
@@ -35,6 +35,7 @@ export default function AlertRules() {
 
   if (loading && !data) return <Loading />;
   if (!data) return <Screen><ErrorBanner message={error ?? 'Could not load alert rules.'} onRetry={refresh} /></Screen>;
+  if (!data.allowed) return <Screen />;
 
   async function addPack(pack: RulePack, title: string) {
     setActionError(null);
@@ -72,7 +73,7 @@ export default function AlertRules() {
     }
   }
 
-  const editable = data.allowed && data.canEdit;
+  const editable = data.canEdit;
 
   return (
     <Screen>
@@ -85,11 +86,9 @@ export default function AlertRules() {
           computer already uses its own web proxy, the site is not blocked. Rules are checked against activity the
           desktop app already records, so they need Websites and Applications switched on under Monitoring & privacy.
           An alert shows that a site was visited or a program used, not what was done there. Restricting a program or
-          a website needs the desktop app version 2.6.3. Alerts appear under Alerts and in Slack/Teams if connected.
+          a website needs           the desktop app version 2.6.3. Alerts appear under Alerts and in Slack/Teams if connected.
         </Text>
-        {!data.allowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>Alert rules are not included in your plan. Contact Mycroscope to upgrade.</Text>
-        ) : !data.canEdit ? (
+        {!data.canEdit ? (
           <Text style={styles.hint}>Only the owner and managers who are not limited to teams can change rules.</Text>
         ) : null}
       </Card>

@@ -29,7 +29,8 @@ export default function WorkHours() {
     ]);
     return {
       settings, schedules, teams, people: people.filter((p) => p.is_active),
-      scope: manageableTeams(teams, managers, profile), allowed: features.includes('team_schedules'),
+      scope: manageableTeams(teams, managers, profile),
+      allowed: features.includes('schedule_adherence') && features.includes('time_tracking'),
     };
   }, [profile.organizationId]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -70,19 +71,14 @@ export default function WorkHours() {
     <Screen>
       <Card title="Working hours">
         <Text style={styles.hint}>
-          Teams and individual people can have their own working hours, for example a dispatch team that starts at 06:00
-          or a part-time employee. A person's own hours come first, then their team's, then the company's. The hours are
-          listed in the monitoring notice, so changing them publishes a new notice version.
+          {data.allowed
+            ? 'Teams and individual people can have their own working hours, for example a dispatch team that starts at 06:00 or a part-time employee. A person\'s own hours come first, then their team\'s, then the company\'s. The hours are listed in the monitoring notice, so changing them publishes a new notice version.'
+            : 'These hours apply to everyone. They are listed in the monitoring notice, so changing them publishes a new notice version.'}
         </Text>
         {!inForce ? (
           <Text style={[styles.hint, { color: colors.danger }]}>
             Monitoring currently runs whenever people are signed in, so these hours are not in force. Choose "Working hours
             only" under Monitoring & privacy to use them.
-          </Text>
-        ) : null}
-        {!data.allowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>
-            Team and individual working hours are not included in your plan.
           </Text>
         ) : null}
       </Card>

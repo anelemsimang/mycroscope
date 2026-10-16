@@ -4,7 +4,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import { Card, Empty, ErrorBanner, Loading, Pill, Screen, Segmented, colors, styles } from '@/components/ui';
 import { ALERT_TITLES, describeAlert } from '@/lib/alerts';
-import { api } from '@/lib/api';
+import { api, type Feature } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -17,6 +17,8 @@ export default function Alerts() {
   const profile = useProfile();
   const [days, setDays] = useState<Period>('7');
   const [kind, setKind] = useState<string>('all');
+  const features = useAsync(() => api.features(), []);
+  const has = (key: Feature) => features.data?.includes(key) ?? false;
   const { data, error, loading, refreshing, refresh } = useAsync(
     () => api.integrityAlerts(new Date(Date.now() - Number(days) * 86_400_000).toISOString()), [days]);
 
@@ -31,10 +33,16 @@ export default function Alerts() {
           and files copied. They are indications, not proof: talk to the employee before drawing conclusions. Which checks
           run is set under Monitoring & privacy and Alert rules, and employees are told about them in the monitoring notice.
         </Text>
-        <View style={[styles.row, { gap: 16, flexWrap: 'wrap' }]}>
-          <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/alert-rules')}>Alert rules</Text>
-          <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/integrations')}>Slack, Teams & API</Text>
-        </View>
+        {(has('website_tracking') || has('channels') || has('api')) ? (
+          <View style={[styles.row, { gap: 16, flexWrap: 'wrap' }]}>
+            {has('website_tracking') ? (
+              <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/alert-rules')}>Alert rules</Text>
+            ) : null}
+            {has('channels') || has('api') ? (
+              <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/integrations')}>Slack, Teams & API</Text>
+            ) : null}
+          </View>
+        ) : null}
         <Segmented options={(Object.keys(PERIODS) as Period[]).map((p) => ({ value: p, label: PERIODS[p] }))} value={days} onChange={setDays} />
         {kinds.length > 1 ? (
           <Segmented options={[{ value: 'all', label: 'All' }, ...kinds.map((k) => ({ value: k, label: ALERT_TITLES[k] ?? k }))]}

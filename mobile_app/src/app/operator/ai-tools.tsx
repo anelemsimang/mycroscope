@@ -35,7 +35,7 @@ export default function OperatorAiTools() {
     try {
       await operatorApi.saveAiTool(editing?.id ?? null, name.trim(), split(domains), split(apps), enabled);
       edit(null);
-      notify('AI tool saved', 'Companies on Business and up can mark it approved or not approved.');
+      notify('AI tool saved', 'Companies whose plan includes AI tool reports can mark it approved or not approved.');
       refresh();
     } catch (e) {
       setErr(errorMessage(e));

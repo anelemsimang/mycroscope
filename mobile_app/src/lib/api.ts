@@ -147,21 +147,17 @@ const SETTINGS_COLUMNS = 'track_apps,track_window_titles,track_web_domains,track
 export type ServiceLevel = 'full' | 'read_only';
 export interface ServiceStatus {
   level: ServiceLevel;
-  status: 'trialing' | 'active' | 'past_due' | 'cancelled' | 'suspended';
+  status: 'active' | 'past_due' | 'lapsed' | 'cancelled' | 'suspended';
   plan: string;
-  trial_ends_at: string | null;
   current_period_end: string | null;
   grace_until: string | null;
   seats: number;
   seats_used: number;
   require_mfa: boolean;
-  /** Free case-study period agreed with Mycroscope; the normal trial follows it. */
-  case_study_until: string | null;
-}
-
-/** True while a free case study is running (the subscription is still 'trialing'). */
-export function inCaseStudy(s: { status: string | null; case_study_until: string | null }, now = Date.now()): boolean {
-  return s.status === 'trialing' && !!s.case_study_until && Date.parse(s.case_study_until) > now;
+  /** Null when the plan does not cap seats. */
+  seat_cap: number | null;
+  cancel_at_period_end?: boolean;
+  pending_plan?: string | null;
 }
 
 export interface Team { id: string; name: string; office_days_per_week: number | null }
@@ -189,9 +185,35 @@ export interface CoachingNote { id: string; team_id: string | null; team_name: s
 export type Category = 'productive' | 'neutral' | 'unproductive';
 export interface CategoryRule { id: string; kind: 'app' | 'domain'; pattern: string; category: Category; team_id: string | null }
 
-/** Plan features (see plan_features in the database). */
-export type Feature = 'team_categories' | 'team_schedules' | 'trends' | 'goals' | 'workload' | 'software_usage'
-  | 'alert_rules' | 'channels' | 'file_activity' | 'api' | 'work_location' | 'ai_tools' | 'work_advisor';
+/** Stable feature keys from the plan catalogue. Cumulative: a higher plan includes every key below it. */
+export type Feature = 'real_time_visibility' | 'time_tracking' | 'schedule_adherence' | 'website_tracking'
+  | 'software_usage' | 'channels'
+  | 'teams' | 'work_location_insights' | 'productivity_goals' | 'workload_planning'
+  | 'file_activity' | 'ai_tools'
+  | 'capacity_planning' | 'financial_estimates' | 'coaching' | 'trends' | 'api';
+
+const INSIGHT_FEATURES: Feature[] = [
+  'trends', 'workload_planning', 'capacity_planning', 'software_usage',
+  'work_location_insights', 'ai_tools', 'coaching',
+];
+
+export function planHasInsights(features: readonly string[]): boolean {
+  return INSIGHT_FEATURES.some((key) => features.includes(key));
+}
+
+export interface PlanCatalogueEntry {
+  key: string;
+  name: string;
+  rank: number;
+  net_price_cents: number;
+  vat_cents: number;
+  gross_price_cents: number;
+  seat_cap: number | null;
+  retention_label: string;
+  vat_enabled: boolean;
+  vat_rate: number;
+  features: Feature[];
+}
 
 export type Severity = 'low' | 'medium' | 'high';
 export interface AlertRule {
@@ -326,6 +348,34 @@ export interface Payment {
   reference: string; amount_cents: number; currency: string; seats: number; months: number; paid_at: string;
 }
 
+export interface PlanQuote {
+  kind: 'new' | 'renewal' | 'upgrade' | 'downgrade' | 'current';
+  gross_cents: number;
+  net_cents?: number;
+  vat_cents?: number;
+  seats: number;
+  plan: string;
+  intent_id?: string;
+  message?: string;
+}
+
+export interface Invoice {
+  number: string;
+  issued_at: string;
+  organization_name: string;
+  plan_name: string;
+  description: string;
+  seats: number;
+  net_cents: number;
+  vat_cents: number;
+  gross_cents: number;
+  vat_rate: number;
+  vat_enabled: boolean;
+  business_name: string;
+  business_vat_number: string | null;
+  business_address: string;
+}
+
 export interface OperatorOrg {
   organization_id: string;
   name: string;
@@ -340,18 +390,14 @@ export interface OperatorOrg {
   activated_employees: number;
   agents_online: number;
   last_activity_at: string | null;
-  trial_ends_at: string | null;
   current_period_end: string | null;
   support_access_until: string | null;
-  case_study_until: string | null;
 }
-
-export interface CaseStudyInvite { email: string; months: number; note: string; created_at: string }
 
 export interface SystemHealth {
   organizations: number;
   paying_organizations: number;
-  trialing_organizations: number;
+  free_organizations: number;
   active_employees: number;
   agents_online: number;
   segments_last_24h: number;
@@ -406,8 +452,28 @@ export function errorMessage(error: unknown): string {
   if (e.message?.includes('Failed to fetch') || e.message?.includes('Network request failed')) {
     return "Can't reach the server. Check your internet connection.";
   }
-  if (e.code === '42501') return "You don't have permission to do that.";
-  return e.message || 'Something went wrong.';
+  const msg = e.message?.trim() ?? '';
+  if (e.code === '42501' && (!msg || /^permission denied\b/i.test(msg) || msg === 'Not allowed')) {
+    return "You don't have permission to do that.";
+  }
+  return msg || 'Something went wrong.';
+}
+
+async function functionError(error: unknown): Promise<string> {
+  const fallback = errorMessage(error);
+  const response = (error as { context?: { json?: () => Promise<unknown> } }).context;
+  if (!response?.json) return fallback;
+  try {
+    const body = await response.json();
+    if (body && typeof body === 'object') {
+      const text = (body as { error?: unknown; message?: unknown }).error
+        ?? (body as { message?: unknown }).message;
+      if (typeof text === 'string' && text.trim() && !text.includes('non-2xx')) return text;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
 }
 
 async function rpc<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -608,21 +674,31 @@ export const api = {
     return (data ?? []) as Payment[];
   },
 
-  /** Starts a Paystack payment; returns the page to send the owner to. */
-  startCheckout: async (seats: number, months: number, returnUrl: string) => {
-    const { data, error } = await supabase.functions.invoke('paystack-checkout', {
-      body: { seats, months, return_url: returnUrl },
+  /** Preview of a plan change. Nothing is charged and no downgrade is scheduled. */
+  quotePlan: (plan: string) => rpc<PlanQuote>('quote_plan_change', { p_plan: plan, p_commit: false }),
+
+  /** Schedules a downgrade or cancellation for the end of the paid year. */
+  commitPlanChange: (plan: string) => rpc<PlanQuote>('quote_plan_change', { p_plan: plan, p_commit: true }),
+
+  cancelPlanChange: () => rpc<void>('cancel_pending_plan_change'),
+
+  invoices: () => rpc<Invoice[]>('get_my_invoices'),
+
+  /** Starts a Yoco payment for one plan. The webhook, not the return page, confirms it. */
+  startCheckout: async (plan: string, urls: { success: string; cancel?: string; failure?: string }) => {
+    const { data, error } = await supabase.functions.invoke('yoco-checkout', {
+      body: { plan, return_url: urls.success, cancel_url: urls.cancel, failure_url: urls.failure },
     });
     if (error) {
       const ctx = (error as { context?: Response }).context;
-      let message = 'Online payment is not available yet. Contact Mycroscope support to pay by EFT.';
+      let message = 'Online payment is not available yet.';
       try {
         const body = ctx ? await ctx.json() : null;
         if (body?.error) message = body.error;
       } catch { /* keep the generic message */ }
       throw new Error(message);
     }
-    return data as { authorization_url: string; reference: string; amount_cents: number; currency: string };
+    return data as { redirect_url: string | null; reference?: string; amount_cents: number; kind?: string; message?: string };
   },
 
   supportGrants: async () => {
@@ -688,9 +764,24 @@ export const api = {
     const { data, error } = await supabase.functions.invoke('work-advisor', {
       body: { template, from, to, team: team ?? null, scope: scope ?? null },
     });
-    if (error) throw error;
+    if (error) throw new Error(await functionError(error));
     if (!data?.answer) throw new Error(data?.error ?? 'No answer was returned.');
     return String(data.answer);
+  },
+  /** Every written report for the period, for one PDF. Nothing is saved in the report list. */
+  advisorPdf: async (from: Ymd, to: Ymd, team?: string | null, scope?: string) => {
+    const { data, error } = await supabase.functions.invoke('work-advisor', {
+      body: { template: 'all', from, to, team: team ?? null, scope: scope ?? null },
+    });
+    if (error) throw new Error(await functionError(error));
+    const sections = data?.sections;
+    if (!Array.isArray(sections) || sections.length === 0) {
+      throw new Error(data?.error ?? 'No report was returned.');
+    }
+    return sections.map((section: { title?: unknown; answer?: unknown }) => ({
+      title: String(section.title ?? 'Report'),
+      answer: String(section.answer ?? ''),
+    }));
   },
   deleteTeam: (id: string) => rpc<void>('delete_team', { p_team: id }),
   setEmployeeTeam: (employee: string, team: string | null) => rpc<void>('set_employee_team', { p_employee: employee, p_team: team }),
@@ -730,7 +821,8 @@ export const api = {
   rotateInstallKey: () => rpc<string>('rotate_install_key'),
 
   // ---- plan features ---------------------------------------------------------
-  features: async () => (await rpc<Feature[] | null>('get_my_features')) ?? [],
+  features: async () => (await rpc<string[] | null>('get_my_features')) ?? [],
+  planCatalogue: () => rpc<PlanCatalogueEntry[]>('get_plan_catalogue'),
 
   // ---- working hours per team or person --------------------------------------
   workSchedules: async () => {
@@ -860,22 +952,15 @@ export const operatorApi = {
   health: async () => (await rpc<SystemHealth[]>('op_system_health'))[0],
   audit: (limit = 200) => rpc<OperatorAuditEntry[]>('op_operator_audit', { p_limit: limit }),
   updateSubscription: (org: string, changes: {
-    plan?: string | null; status?: string | null; seats?: number | null; trial_ends_at?: string | null;
+    plan?: string | null; status?: string | null; seats?: number | null;
     current_period_end?: string | null;
   }, note: string) => rpc('op_update_subscription', {
     p_org: org, p_plan: changes.plan ?? null, p_status: changes.status ?? null, p_seats: changes.seats ?? null,
-    p_trial_ends_at: changes.trial_ends_at ?? null, p_current_period_end: changes.current_period_end ?? null, p_note: note,
+    p_current_period_end: changes.current_period_end ?? null, p_note: note,
   }),
   supportSnapshot: (org: string) => rpc<SupportSnapshotRow[]>('op_support_snapshot', { p_org: org }),
   deleteOrganization: (org: string, confirmName: string) =>
     rpc<void>('op_delete_organization', { p_org: org, p_confirm_name: confirmName }),
-  /** months 1-24 starts a case study today; 0 ends the running one (the 14-day trial then starts). */
-  setCaseStudy: (org: string, months: number, note: string) =>
-    rpc('op_set_case_study', { p_org: org, p_months: months, p_note: note }),
-  caseStudyInvites: () => rpc<CaseStudyInvite[]>('op_case_study_invites'),
-  inviteCaseStudy: (email: string, months: number, note: string) =>
-    rpc<void>('op_invite_case_study', { p_email: email, p_months: months, p_note: note }),
-  cancelCaseStudyInvite: (email: string) => rpc<void>('op_cancel_case_study_invite', { p_email: email }),
   aiTools: () => rpc<OperatorAiTool[]>('op_ai_tools'),
   saveAiTool: (id: string | null, name: string, domains: string[], apps: string[], enabled: boolean) =>
     rpc<OperatorAiTool>('op_save_ai_tool', { p_id: id, p_name: name, p_domains: domains, p_apps: apps, p_enabled: enabled }),

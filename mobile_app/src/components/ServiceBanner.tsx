@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 
 import { colors, styles } from '@/components/ui';
-import { inCaseStudy, type ServiceStatus } from '@/lib/api';
+import { type ServiceStatus } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 
 const DAY = 86_400_000;
@@ -11,31 +11,29 @@ const DAY = 86_400_000;
 export function serviceMessage(s: ServiceStatus | null, timezone: string, now = Date.now()): { text: string; tone: 'info' | 'warning' | 'danger' } | null {
   if (!s) return null;
   if (s.level === 'read_only') {
-    const why = s.status === 'trialing' ? 'Your free trial has ended'
-      : s.status === 'suspended' ? 'Your subscription is suspended'
+    const why = s.status === 'suspended' ? 'Your subscription is suspended'
       : s.status === 'cancelled' ? 'Your subscription is cancelled'
       : 'Your subscription has expired';
     return { text: `${why}. Data stays viewable, but nothing new is recorded and no employees can be added.`, tone: 'danger' };
   }
-  if (inCaseStudy(s, now) && s.case_study_until) {
-    const days = Math.ceil((Date.parse(s.case_study_until) - now) / DAY);
-    const end = formatDate(s.case_study_until, timezone);
-    return days <= 30
-      ? { text: `Your free case study ends on ${end} (${days} day${days === 1 ? '' : 's'}). A 14-day trial follows, then a subscription is needed.`, tone: 'warning' }
-      : { text: `Free case study until ${end}. Thank you for taking part.`, tone: 'info' };
+  if (s.status === 'lapsed') {
+    return { text: 'The paid plan ended. You are on the Free plan. Older activity is hidden, and extra people are paused. Upgrade plan for paid features.', tone: 'warning' };
   }
-  if (s.status === 'trialing' && s.trial_ends_at) {
-    const days = Math.max(0, Math.ceil((Date.parse(s.trial_ends_at) - now) / DAY));
-    return { text: `Free trial: ${days} day${days === 1 ? '' : 's'} left (until ${formatDate(s.trial_ends_at, timezone)}).`, tone: days <= 3 ? 'warning' : 'info' };
+  if (s.pending_plan) {
+    return { text: `A plan change is scheduled for ${formatDate(s.current_period_end, timezone)}. You keep the current plan until then.`, tone: 'info' };
   }
+  if (s.seat_cap !== null && s.seats_used >= s.seat_cap) {
+    return { text: `This plan includes ${s.seat_cap} people, and all of them are in use. Upgrade to add more.`, tone: 'warning' };
+  }
+  if (s.plan === 'free') return null;
   if (s.current_period_end && Date.parse(s.current_period_end) < now) {
-    return { text: `Payment overdue. Recording stops on ${formatDate(s.grace_until, timezone)} unless the subscription is renewed.`, tone: 'danger' };
+    return { text: `Payment overdue. This plan stays available until ${formatDate(s.grace_until, timezone)}. After that the account moves to the Free plan. Nothing is deleted.`, tone: 'danger' };
   }
   if (s.current_period_end && Date.parse(s.current_period_end) - now < 7 * DAY) {
     return { text: `Your subscription renews on ${formatDate(s.current_period_end, timezone)}.`, tone: 'warning' };
   }
-  if (s.seats_used >= s.seats) {
-    return { text: `All ${s.seats} seats are in use. Add seats to register more employees.`, tone: 'warning' };
+  if (s.seats_used > s.seats) {
+    return { text: `${s.seats_used} people are active. The next renewal bills all of them.`, tone: 'info' };
   }
   return null;
 }

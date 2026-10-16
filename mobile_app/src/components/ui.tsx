@@ -48,14 +48,14 @@ export const stateLabel: Record<ActivityState, string> = {
   inactive: 'Not recording (subscription)',
 };
 
-export function Screen({ children, refreshing, onRefresh, padded = true }: PropsWithChildren<{
-  refreshing?: boolean; onRefresh?: () => void; padded?: boolean;
+export function Screen({ children, refreshing, onRefresh, padded = true, maxWidth = 820 }: PropsWithChildren<{
+  refreshing?: boolean; onRefresh?: () => void; padded?: boolean; maxWidth?: number;
 }>) {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={[
-        { width: '100%', maxWidth: 820, alignSelf: 'center' },
+        { width: '100%', maxWidth, alignSelf: 'center' },
         padded ? { padding: 12, paddingBottom: 40, gap: 12 } : null,
       ]}
       keyboardShouldPersistTaps="handled"
@@ -173,6 +173,39 @@ export function Stat({ label, value, color }: { label: string; value: string; co
     <View style={{ flex: 1, alignItems: 'center' }}>
       <Text style={[styles.statValue, color ? { color } : null]}>{value}</Text>
       <Text style={styles.hint}>{label}</Text>
+    </View>
+  );
+}
+
+/** Vertical bars for a report. Values are drawn against the tallest bar. */
+export function ColumnChart({ points }: { points: { label: string; value: number; color?: string }[] }) {
+  const max = Math.max(1, ...points.map((point) => point.value));
+  const plot = 128;
+  if (points.length === 0) return null;
+  return (
+    <View>
+      <View style={{ height: plot, flexDirection: 'row', alignItems: 'flex-end', gap: 4 }}>
+        {points.map((point, index) => (
+          <View key={`${point.label}-${index}`} style={{ flex: 1, height: plot, justifyContent: 'flex-end', alignItems: 'center' }}>
+            <View style={{
+              height: Math.max(2, (point.value / max) * plot),
+              width: '70%',
+              maxWidth: 28,
+              backgroundColor: point.color ?? colors.primary,
+              borderTopLeftRadius: 3,
+              borderTopRightRadius: 3,
+            }} />
+          </View>
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row', gap: 4, marginTop: 4 }}>
+        {points.map((point, index) => (
+          <Text key={`${point.label}-label-${index}`} numberOfLines={2}
+            style={{ flex: 1, fontSize: 9, lineHeight: 11, color: colors.muted, textAlign: 'center' }}>
+            {point.label}
+          </Text>
+        ))}
+      </View>
     </View>
   );
 }

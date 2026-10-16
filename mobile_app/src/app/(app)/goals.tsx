@@ -18,13 +18,14 @@ export default function Goals() {
   const profile = useProfile();
   const { data, error, loading, refresh, reload } = useAsync(async () => {
     const [goals, { teams, managers }, features] = await Promise.all([api.goals(), api.teams(), api.features()]);
-    return { goals, scope: manageableTeams(teams, managers, profile), allowed: features.includes('goals') };
+    return { goals, scope: manageableTeams(teams, managers, profile), allowed: features.includes('productivity_goals') };
   }, [profile.employeeId]);
   const [editing, setEditing] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   if (loading && !data) return <Loading />;
   if (!data) return <Screen><ErrorBanner message={error ?? 'Could not load goals.'} onRetry={refresh} /></Screen>;
+  if (!data.allowed) return <Screen />;
 
   const company = data.goals.find((g) => g.team_id === null) ?? null;
   const byTeam = new Map(data.goals.filter((g) => g.team_id).map((g) => [g.team_id!, g]));
@@ -74,11 +75,6 @@ export default function Goals() {
           over-utilised share may be overloaded. A team's goal replaces the company goal for that team. Goals are only
           visible to owners and managers.
         </Text>
-        {!data.allowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>
-            Productivity goals are not included in your plan. Contact Mycroscope to upgrade.
-          </Text>
-        ) : null}
       </Card>
       {actionError ? <ErrorBanner message={actionError} /> : null}
       {data.allowed ? (

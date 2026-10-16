@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Text } from 'react-native';
 
-import { Button, Card, ErrorBanner, Field, Screen, ToggleRow, styles } from '@/components/ui';
+import { Button, Card, ErrorBanner, Field, Screen, ToggleRow, colors, styles } from '@/components/ui';
 import { errorMessage } from '@/lib/api';
 import { webAppUrl } from '@/lib/authLink';
 import { supabase } from '@/lib/supabase';
@@ -16,6 +16,7 @@ export default function SignUp() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [authorised, setAuthorised] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentTo, setSentTo] = useState<string | null>(null);
@@ -26,6 +27,7 @@ export default function SignUp() {
     if (password.length < 8) return setError('The password must be at least 8 characters.');
     if (password !== confirm) return setError("The passwords don't match.");
     if (!authorised) return setError('Please confirm that you may act for this organisation.');
+    if (!agreed) return setError('Please agree to the terms of service and the privacy policy.');
     setBusy(true);
     try {
       const { data, error: authError } = await supabase.auth.signUp({
@@ -72,6 +74,14 @@ export default function SignUp() {
       <ToggleRow value={authorised} onChange={setAuthorised}
         label="I may act for this organisation"
         hint="As owner you are responsible for telling employees about monitoring (POPIA). Mycroscope shows them a notice before tracking starts." />
+      <ToggleRow value={agreed} onChange={setAgreed}
+        label="I agree to the terms of service and the privacy policy" />
+      <Text style={styles.hint}>
+        Read the{' '}
+        <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/terms')}>terms of service</Text>
+        {' '}and the{' '}
+        <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => router.push('/privacy')}>privacy policy</Text>.
+      </Text>
       <Button title="Create organisation" onPress={submit} loading={busy} />
     </Screen>
   );

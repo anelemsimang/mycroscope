@@ -46,7 +46,8 @@ function RootNavigator() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
   useEffect(() => {
-    if (!isLoading && signedIn && operator && !pathname.startsWith('/operator') && !pathname.startsWith('/auth/')) {
+    const legal = pathname === '/terms' || pathname === '/privacy';
+    if (!isLoading && signedIn && operator && !legal && !pathname.startsWith('/operator') && !pathname.startsWith('/auth/')) {
       router.replace('/operator');
     }
   }, [isLoading, signedIn, operator, pathname]);
@@ -70,6 +71,8 @@ function RootNavigator() {
         <Stack.Screen name="sign-up" options={{ title: 'Organisation Registration' }} />
         <Stack.Screen name="forgot-password" options={{ title: 'Reset password' }} />
       </Stack.Protected>
+      <Stack.Screen name="terms" options={{ title: 'Terms of service' }} />
+      <Stack.Screen name="privacy" options={{ title: 'Privacy policy' }} />
       <Stack.Screen name="auth/confirm" options={{ title: 'Confirm email', headerBackVisible: false }} />
       <Stack.Screen name="auth/reset-password" options={{ title: 'Choose a new password', headerBackVisible: false }} />
     </Stack>

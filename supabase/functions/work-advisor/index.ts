@@ -6,7 +6,7 @@ import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 
 import {
   type CapacityFigure, type ReportFigures, type ReportTemplate, REPORT_TITLES, type SoftwareFigure,
-  type TrendPoint, type WorkloadFigure, writeReport,
+  type TrendPoint, type WorkloadFigure, writeAllReports, writeReport,
 } from '../_shared/advisor.ts';
 import { timingSafeEqual } from '../_shared/billing.ts';
 import { CORS, env, json } from '../_shared/http.ts';
@@ -70,8 +70,9 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: 'Choose a report and a period.' }, 400);
   }
-  const template = body.template as ReportTemplate;
-  if (!TEMPLATES.has(template)) return json({ error: 'Choose a report.' }, 400);
+  const template = body.template;
+  const bundle = template === 'all';
+  if (!bundle && !TEMPLATES.has(template as ReportTemplate)) return json({ error: 'Choose a report.' }, 400);
   const dates = period(body.from, body.to);
   if (typeof dates === 'string') return json({ error: dates }, 400);
   const team = typeof body.team === 'string' && body.team ? body.team : null;
@@ -83,10 +84,19 @@ Deno.serve(async (req) => {
   if (dirError) return json({ error: dirError.message }, 400);
 
   try {
-    const figures = await loadFigures(user, template, dates, team, scope);
-    const answer = writeReport(template, figures).slice(0, 8000);
+    const figures = await loadFigures(user, bundle ? 'week' : template as ReportTemplate, dates, team, scope);
+    if (bundle) {
+      return json({
+        sections: writeAllReports(figures).map((section) => ({
+          title: section.title,
+          answer: section.answer.slice(0, 8000),
+        })),
+      });
+    }
+    const chosen = template as ReportTemplate;
+    const answer = writeReport(chosen, figures).slice(0, 8000);
     const { error: saveError } = await user.rpc('save_advisor_question', {
-      p_question: REPORT_TITLES[template], p_answer: answer, p_team: team,
+      p_question: REPORT_TITLES[chosen], p_answer: answer, p_team: team,
     });
     if (saveError) return json({ error: saveError.message }, 400);
     return json({ answer });

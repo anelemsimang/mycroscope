@@ -6,10 +6,11 @@ import { Text } from 'react-native';
 import { EmailPreferences } from '@/components/EmailPreferences';
 import { MfaSetup } from '@/components/MfaSetup';
 import { Button, Card, ErrorBanner, Field, LinkRow, Screen, styles } from '@/components/ui';
-import { errorMessage } from '@/lib/api';
+import { api, planHasInsights, errorMessage, type Feature } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { useProfile, useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
+import { useAsync } from '@/lib/useAsync';
 
 const roleLabel = { owner: 'Owner', manager: 'Manager', employee: 'Employee' } as const;
 
@@ -20,6 +21,8 @@ export function AccountPanel() {
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const features = useAsync(() => (isManager ? api.features() : Promise.resolve([] as Feature[])), [isManager]);
+  const has = (key: Feature) => features.data?.includes(key) ?? false;
 
   async function changePassword() {
     setError(null);
@@ -48,21 +51,33 @@ export function AccountPanel() {
       </Card>
       {isManager ? (
         <Card title="Organisation">
-          <LinkRow title="Alerts" subtitle="Integrity checks, alert rules, drives and copied files, PCs not reporting"
+          <LinkRow title="Alerts" subtitle="Signals that tracking may have been avoided"
             onPress={() => router.push('/alerts')} />
-          <LinkRow title="Alert rules" subtitle="Alerts for file-sharing sites, personal email, Bluetooth and your own list"
-            onPress={() => router.push('/alert-rules')} />
-          <LinkRow title="Slack, Teams & API" subtitle="Send alerts to a channel or webhook; read-only API keys"
-            onPress={() => router.push('/integrations')} />
-          <LinkRow title="Productivity categories" subtitle="Mark apps and websites as productive or unproductive, per team if needed"
+          {has('website_tracking') ? (
+            <LinkRow title="Alert rules" subtitle="Alerts for file-sharing sites, personal email, Bluetooth and your own list"
+              onPress={() => router.push('/alert-rules')} />
+          ) : null}
+          {has('channels') || has('api') ? (
+            <LinkRow title="Slack, Teams & API" subtitle="Send alerts to a channel or webhook; read-only API keys"
+              onPress={() => router.push('/integrations')} />
+          ) : null}
+          <LinkRow title="Productivity categories" subtitle={has('teams')
+            ? 'Mark apps and websites as productive or unproductive, per team if needed'
+            : 'Mark apps and websites as productive or unproductive'}
             onPress={() => router.push('/categories')} />
-          <LinkRow title="Insights" subtitle="Trends, workload, capacity and software licences"
-            onPress={() => router.push('/insights')} />
-          <LinkRow title="Productivity goals" subtitle="Expected productive hours per day, for the company or a team"
-            onPress={() => router.push('/goals')} />
-          <LinkRow title="Working hours" subtitle="Different hours for teams or individual people"
-            onPress={() => router.push('/work-hours')} />
-          {profile.role === 'owner' ? (
+          {features.data && planHasInsights(features.data) ? (
+            <LinkRow title="Insights" subtitle="Trends, workload, capacity and software licences"
+              onPress={() => router.push('/insights')} />
+          ) : null}
+          {has('productivity_goals') ? (
+            <LinkRow title="Productivity goals" subtitle="Expected productive hours per day, for the company or a team"
+              onPress={() => router.push('/goals')} />
+          ) : null}
+          {has('schedule_adherence') && has('time_tracking') ? (
+            <LinkRow title="Working hours" subtitle="Different hours for teams or individual people"
+              onPress={() => router.push('/work-hours')} />
+          ) : null}
+          {profile.role === 'owner' && has('teams') ? (
             <LinkRow title="Teams" subtitle="Group employees and choose which managers see them"
               onPress={() => router.push('/teams')} />
           ) : null}
@@ -108,6 +123,12 @@ export function AccountPanel() {
         <Field label="New password" value={password} onChangeText={setPassword} secureTextEntry textContentType="newPassword" />
         <Field label="Confirm new password" value={confirm} onChangeText={setConfirm} secureTextEntry />
         <Button title="Change password" variant="secondary" onPress={changePassword} loading={busy} disabled={!password} />
+      </Card>
+      <Card title="Legal">
+        <LinkRow title="Terms of service" subtitle="The agreement for using Mycroscope"
+          onPress={() => router.push('/terms')} />
+        <LinkRow title="Privacy policy" subtitle="What is stored, who can see it, and how long it is kept"
+          onPress={() => router.push('/privacy')} />
       </Card>
       <Button title="Sign out" variant="danger" onPress={async () => {
         if (await confirmAction('Sign out?', undefined, 'Sign out')) signOut();

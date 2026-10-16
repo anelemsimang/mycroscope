@@ -7,7 +7,7 @@ import { ServiceBanner } from '@/components/ServiceBanner';
 import {
   ActionButton, Button, Card, Empty, ErrorBanner, Loading, Pill, Screen, StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
-import { api, type TeamRow } from '@/lib/api';
+import { api, planHasInsights, type TeamRow } from '@/lib/api';
 import { confirmAction } from '@/lib/dialog';
 import { formatDuration, formatRelative, formatTime, todayIn } from '@/lib/format';
 import { useProfile, useSession } from '@/lib/session';
@@ -21,11 +21,16 @@ export default function Dashboard() {
   const profile = useProfile();
   const { signOut, service } = useSession();
   const [live, setLive] = useState(false);
+  const [features, setFeatures] = useState<string[] | null>(null);
   const alerts = useAsync(() => api.integrityAlerts(new Date(Date.now() - 86_400_000).toISOString()), []);
   const highAlerts = (alerts.data ?? []).filter((a) => a.severity === 'high').length;
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const { data, error, loading, refreshing, refresh, reload } = useAsync(async () => {
-    const rows = await api.teamOverview(todayIn(profile.timezone));
+    const [rows, features] = await Promise.all([
+      api.teamOverview(todayIn(profile.timezone)),
+      api.features(),
+    ]);
+    setFeatures(features);
     setUpdatedAt(new Date().toISOString());
     return rows;
   }, [profile.timezone]);
@@ -53,8 +58,9 @@ export default function Dashboard() {
     };
   }, [profile.organizationId]);
 
+  const liveAllowed = features?.includes('real_time_visibility') ?? false;
   const all = data ?? [];
-  const team = useMemo(() => sortRows(all.filter((r) => r.is_active)), [all]);
+  const team = useMemo(() => sortRows(all.filter((r) => r.is_active), liveAllowed), [all, liveAllowed]);
   const deactivated = all.filter((r) => !r.is_active);
   const online = team.filter((r) => r.is_online).length;
   const totalActive = team.reduce((a, r) => a + r.active_seconds, 0);
@@ -65,12 +71,16 @@ export default function Dashboard() {
       <View style={local.header}>
         <Text style={local.welcome}>Welcome, {profile.name}</Text>
         <Text style={styles.hint}>{profile.role === 'owner' ? 'Owner' : 'Manager'} Dashboard · {profile.organizationName}</Text>
-        <View style={[styles.row, { gap: 6, marginTop: 4 }]}>
-          <View style={[local.dot, { backgroundColor: live ? colors.success : colors.danger }]} />
-          <Text style={styles.hint}>
-            {live ? 'Live data' : 'Connecting…'}{updatedAt ? ` · updated ${formatTime(updatedAt, profile.timezone)}` : ''}
-          </Text>
-        </View>
+        {liveAllowed ? (
+          <View style={[styles.row, { gap: 6, marginTop: 4 }]}>
+            <View style={[local.dot, { backgroundColor: live ? colors.success : colors.danger }]} />
+            <Text style={styles.hint}>
+              {live ? 'Live data' : 'Connecting…'}{updatedAt ? ` · updated ${formatTime(updatedAt, profile.timezone)}` : ''}
+            </Text>
+          </View>
+        ) : updatedAt ? (
+          <Text style={[styles.hint, { marginTop: 4 }]}>Updated {formatTime(updatedAt, profile.timezone)}</Text>
+        ) : null}
       </View>
 
       <View style={local.body}>
@@ -88,7 +98,7 @@ export default function Dashboard() {
           </Pressable>
         ) : null}
         <StatGrid items={[
-          { label: 'Online now', value: `${online}/${team.length}` },
+          ...(liveAllowed ? [{ label: 'Online now', value: `${online}/${team.length}` }] : []),
           { label: 'Team active today', value: formatDuration(totalActive), color: colors.success },
           { label: 'Team idle today', value: formatDuration(totalIdle), color: colors.warning },
         ]} />
@@ -96,7 +106,9 @@ export default function Dashboard() {
         <Card title="Quick Actions">
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <ActionButton title="Reports" onPress={() => router.push('/reports')} />
-            <ActionButton title="Insights" onPress={() => router.push('/insights')} />
+            {features && planHasInsights(features) ? (
+              <ActionButton title="Insights" onPress={() => router.push('/insights')} />
+            ) : null}
             <ActionButton title="Register Employee" onPress={() => router.push('/register')} />
             <ActionButton title="Alerts" onPress={() => router.push('/alerts')} />
             <ActionButton title="Settings" onPress={() => router.push('/settings')} />
@@ -106,12 +118,12 @@ export default function Dashboard() {
         <Card title={`Team Overview (${team.length})`}>
           {loading && !data ? <Loading /> : null}
           {data && team.length === 0 ? <Empty text="No employees yet. Tap Register Employee to add one." /> : null}
-          {team.map((r) => <TeamRowItem key={r.employee_id} row={r} />)}
+          {team.map((r) => <TeamRowItem key={r.employee_id} row={r} showLive={liveAllowed} />)}
         </Card>
 
         {deactivated.length > 0 ? (
           <Card title={`Deactivated (${deactivated.length})`}>
-            {deactivated.map((r) => <TeamRowItem key={r.employee_id} row={r} />)}
+            {deactivated.map((r) => <TeamRowItem key={r.employee_id} row={r} showLive={liveAllowed} />)}
           </Card>
         ) : null}
 
@@ -125,9 +137,9 @@ export default function Dashboard() {
   );
 }
 
-function sortRows(rows: TeamRow[]): TeamRow[] {
+function sortRows(rows: TeamRow[], live: boolean): TeamRow[] {
   const rank = (r: TeamRow) => (!r.is_online ? 3 : r.current_state === 'active' ? 0 : r.current_state === 'idle' ? 1 : 2);
-  return [...rows].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  return [...rows].sort((a, b) => (live ? rank(a) - rank(b) : 0) || a.name.localeCompare(b.name));
 }
 
 function statusOf(r: TeamRow): { label: string; color: string } {
@@ -136,9 +148,10 @@ function statusOf(r: TeamRow): { label: string; color: string } {
   return { label: `Online · ${stateLabel[r.current_state]}`, color: stateColor[r.current_state] };
 }
 
-function TeamRowItem({ row }: { row: TeamRow }) {
+function TeamRowItem({ row, showLive }: { row: TeamRow; showLive: boolean }) {
   const status = statusOf(row);
-  const doing = row.is_online && row.current_state === 'active'
+  const doing = !showLive ? ''
+    : row.is_online && row.current_state === 'active'
     ? [row.current_app, row.current_domain].filter(Boolean).join(' · ')
     : row.is_online && row.current_state === 'paused' ? 'Tracking paused by employee'
     : row.activated && !row.is_online ? `Last seen ${formatRelative(row.last_seen_at)}` : '';
@@ -163,10 +176,12 @@ function TeamRowItem({ row }: { row: TeamRow }) {
         {row.activated && row.needs_acknowledgement ? <Pill text="Notice not acknowledged" color={colors.danger} /> : null}
       </Pressable>
       <View style={{ alignItems: 'flex-end', gap: 6 }}>
-        <View style={[styles.row, { gap: 5 }]}>
-          <View style={[local.dot, { backgroundColor: status.color }]} />
-          <Text style={[local.statusText, { color: status.color }]}>{status.label}</Text>
-        </View>
+        {showLive ? (
+          <View style={[styles.row, { gap: 5 }]}>
+            <View style={[local.dot, { backgroundColor: status.color }]} />
+            <Text style={[local.statusText, { color: status.color }]}>{status.label}</Text>
+          </View>
+        ) : null}
         <Pressable hitSlop={6} style={local.manage} accessibilityRole="button" accessibilityLabel={`Manage ${row.name}`}
           onPress={() => router.push({ pathname: '/manage/[id]', params: { id: row.employee_id } })}>
           <Text style={local.manageText}>Manage</Text>

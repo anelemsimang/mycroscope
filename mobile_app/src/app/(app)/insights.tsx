@@ -3,13 +3,15 @@ import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import {
-  BarRow, Button, Card, Empty, ErrorBanner, Field, InnerTabs, Loading, Screen, Segmented, StackedBar, StatGrid, colors, styles,
+  BarRow, Button, Card, ColumnChart, Empty, ErrorBanner, Field, InnerTabs, Loading, Screen, Segmented, StackedBar, StatGrid, colors, styles,
 } from '@/components/ui';
 import {
-  api, errorMessage, type AdvisorQuestion, type AiAdoptionRow, type AiCatalogTool, type AiPersonUsage, type CapacityRow, type CoachingNote, type Feature, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
+  api, errorMessage, type AdvisorQuestion, type AiAdoptionRow, type AiCatalogTool, type AiPersonUsage, type CapacityRow, type CoachingNote, type Granularity, type OfficeAdherence, type SoftwareUsage, type TrendPoint, type WorkloadRow,
   type WorkloadStatus,
 } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
+import { capacityChart, softwareChart, trendChart, workloadChart, writtenCharts } from '@/lib/charts';
+import { sharePdf } from '@/lib/export';
 import {
   addDays, daysBetween, formatDay, formatDuration, formatMoney, percent, periodRange, todayIn, type Ymd,
 } from '@/lib/format';
@@ -30,9 +32,9 @@ const PERIODS: { value: Period; label: string }[] = [
   { value: 'last_90', label: 'Last 90 days' },
   { value: 'last_365', label: 'Last 12 months' },
 ];
-const TAB_FEATURE: Record<Tab, Feature> = {
-  trends: 'trends', workload: 'workload', capacity: 'workload', software: 'software_usage', where: 'work_location',
-  ai: 'ai_tools', advice: 'work_advisor',
+const TAB_FEATURE: Record<Tab, string> = {
+  trends: 'trends', workload: 'workload_planning', capacity: 'capacity_planning', software: 'software_usage',
+  where: 'work_location_insights', ai: 'ai_tools', advice: 'coaching',
 };
 const TAB_LABEL: Record<Tab, string> = {
   trends: 'Trends', workload: 'Workload', capacity: 'Capacity', software: 'Software', where: 'Office days',
@@ -75,15 +77,7 @@ export default function Insights() {
 
   const { features, scope } = setup.data;
   const tabs = (Object.keys(TAB_LABEL) as Tab[]).filter((t) => features.includes(TAB_FEATURE[t]));
-  if (tabs.length === 0) {
-    return (
-      <Screen>
-        <Card title="Insights">
-          <Text style={styles.hint}>Workforce insights are not included in your plan. Contact Mycroscope to upgrade.</Text>
-        </Card>
-      </Screen>
-    );
-  }
+  if (tabs.length === 0) return <Screen />;
   const current = tabs.includes(tab) ? tab : tabs[0];
   const teamOptions = [
     ...(scope.orgWide ? [{ value: ALL, label: 'All teams' }] : [{ value: ALL, label: 'All my teams' }]),
@@ -111,7 +105,7 @@ export default function Insights() {
       {current === 'where' ? <Where from={range.from} to={range.to} team={teamId} /> : null}
       {current === 'ai' ? <AiTools from={range.from} to={range.to} team={teamId} orgWide={scope.orgWide} /> : null}
       {current === 'advice' ? (
-        <Advice from={range.from} to={range.to} team={teamId} scope={
+        <Advice from={range.from} to={range.to} team={teamId} orgName={profile.organizationName} scope={
           team === ALL ? (scope.orgWide ? 'The whole company' : 'My teams') : (scope.teams.find((t) => t.id === team)?.name ?? 'This team')
         } />
       ) : null}
@@ -202,7 +196,9 @@ function Trends({ from, to, team }: { from: Ymd; to: Ymd; team: string | null })
         </Text>
       </Card>
       <Card title={granularity === 'day' ? 'By day' : granularity === 'week' ? 'By week' : 'By month'}>
-        {shown.length === 0 ? <Empty text="No activity in this period." /> : null}
+        {shown.length === 0 ? <Empty text="No activity in this period." /> : (
+          <ColumnChart points={trendChart(shown, granularity)?.points ?? []} />
+        )}
         {shown.map((p) => {
           const neutral = Math.max(0, p.active_seconds - p.productive_seconds - p.unproductive_seconds);
           return (
@@ -377,17 +373,44 @@ const REPORTS: { value: 'week' | 'workload' | 'software' | 'capacity' | 'trend';
   { value: 'trend', label: 'How it changed' },
 ];
 
-function Advice({ from, to, team, scope }: { from: Ymd; to: Ymd; team: string | null; scope: string }) {
+async function chartsFor(from: Ymd, to: Ymd, team: string | null) {
+  const granularity = granularityFor(from, to);
+  const [trend, workload, software, capacity] = await Promise.all([
+    api.trend(from, to, granularity, team),
+    api.workload(from, to, team),
+    api.softwareUsage(from, to, 'app', team),
+    api.capacity(from, to),
+  ]);
+  return writtenCharts({
+    trend, workload, software, granularity,
+    capacity: capacity.filter((row) => !team || row.team_id === team),
+  });
+}
+
+function Advice({ from, to, team, scope, orgName }: {
+  from: Ymd; to: Ymd; team: string | null; scope: string; orgName: string;
+}) {
   const { data, error, loading, refresh } = useAsync(async () => {
     const [questions, notes] = await Promise.all([api.advisorQuestions(), api.coachingNotes()]);
     return { questions, notes };
   }, []);
+  const graphs = useAsync(() => chartsFor(from, to, team), [from, to, team]);
   const [template, setTemplate] = useState<(typeof REPORTS)[number]['value']>('week');
   const [busy, setBusy] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  function periodOk(): boolean {
+    if (daysBetween(from, to) > 90) {
+      setErr('Choose a period of at most 90 days. Last 12 months is too long for a written report.');
+      return false;
+    }
+    return true;
+  }
 
   async function write() {
     setErr(null);
+    if (!periodOk()) return;
     setBusy(true);
     try {
       await api.askAdvisor(template, from, to, team, scope);
@@ -399,20 +422,70 @@ function Advice({ from, to, team, scope }: { from: Ymd; to: Ymd; team: string | 
     }
   }
 
+  async function downloadPdf() {
+    setErr(null);
+    if (!periodOk()) return;
+    setPdfBusy(true);
+    try {
+      const [sections, charts] = await Promise.all([
+        api.advisorPdf(from, to, team, scope),
+        graphs.data ? Promise.resolve(graphs.data) : chartsFor(from, to, team).catch(() => []),
+      ]);
+      await sharePdf(`Mycroscope_report_${from}_${to}`, {
+        kicker: orgName,
+        title: 'Written report',
+        subtitle: `${scope} · ${formatDay(from)} to ${formatDay(to)}`,
+        intro: 'This report is written from the figures Mycroscope already stores for this period. Where a figure is unusually high or low, that is the conclusion the section leads with. People are named. Pay figures are left out.',
+        charts,
+        sections: sections.map((section) => ({
+          heading: section.title,
+          paragraphs: section.answer
+            .replace(new RegExp(`^${section.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.\\s*`), '')
+            .split(/\n\n+/)
+            .map((part) => part.trim())
+            .filter(Boolean),
+        })),
+        notice: 'Contains personal information. Handle it under POPIA.',
+      });
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setPdfBusy(false);
+    }
+  }
+
   if (error) return <ErrorBanner message={error} onRetry={refresh} />;
   if (loading && !data) return <Loading />;
   if (!data) return null;
   return (
     <>
+      <Card title="Graphs">
+        <Text style={styles.hint}>
+          Productive hours over the period, each person's share of their goal, the apps that took the most time, and productive hours a day by team.
+          Green is on the goal, amber is under it, and red is over it. The same graphs are included in the PDF.
+        </Text>
+        {graphs.error ? <ErrorBanner message={graphs.error} onRetry={graphs.refresh} /> : null}
+        {graphs.loading && !graphs.data ? <Loading /> : null}
+        {graphs.data && graphs.data.length === 0 ? <Empty text="No activity to graph in this period." /> : null}
+        {graphs.data?.map((chart) => (
+          <View key={chart.title} style={{ gap: 6, paddingTop: 10 }}>
+            <Text style={styles.rowText}>{chart.title}</Text>
+            <ColumnChart points={chart.points} />
+          </View>
+        ))}
+      </Card>
       <Card title="Write a report">
         <Text style={styles.hint}>
           The report is written inside Mycroscope from the figures already stored for {formatDay(from)} to {formatDay(to)}.
           If a figure is unusually high or low, that is the conclusion the report leads with. It names the people it describes.
-          Pay figures are left out. Choose a period of at most 90 days. Turn this on under Monitoring & privacy.
+          Pay figures are left out. Choose a period of at most 90 days above.
+          Download PDF saves one written document covering Week in review, Workload, Where time went, Capacity and How it changed.
+          Turn this on under Monitoring & privacy.
         </Text>
-        <Segmented options={REPORTS} value={template} onChange={setTemplate} />
         {err ? <ErrorBanner message={err} /> : null}
-        <Button title="Write report" onPress={write} loading={busy} />
+        <Button title="Download PDF" onPress={downloadPdf} loading={pdfBusy} disabled={busy} />
+        <Segmented options={REPORTS} value={template} onChange={setTemplate} />
+        <Button title="Write report" onPress={write} loading={busy} disabled={pdfBusy} />
       </Card>
       <Card title="Reports">
         {data.questions.length === 0 ? <Empty text="No reports yet." /> : null}
@@ -489,7 +562,9 @@ function Workload({ from, to, team }: { from: Ymd; to: Ymd; team: string | null 
             </Text>
           </Pressable>
         ) : null}
-        {scored.length === 0 ? <Empty text="No one with a goal worked in this period." /> : null}
+        {scored.length === 0 ? <Empty text="No one with a goal worked in this period." /> : (
+          <ColumnChart points={workloadChart(scored)?.points ?? []} />
+        )}
         {scored.map((r) => <WorkloadBar key={r.employee_id} row={r} max={max} />)}
       </Card>
       {rest.length > 0 ? (
@@ -558,6 +633,7 @@ function Capacity({ from, to, orgWide, teams }: {
           away is left out, so treat the result as a starting point for a conversation.
         </Text>
         {data.rows.length === 0 ? <Empty text="No activity in this period." /> : null}
+        {capacityChart(data.rows) ? <ColumnChart points={capacityChart(data.rows)!.points} /> : null}
         {data.rows.map((r) => <CapacityLine key={r.team_id ?? 'none'} row={r} />)}
       </Card>
       {orgWide ? (
@@ -716,7 +792,9 @@ function Software({ from, to, team, orgWide }: { from: Ymd; to: Ymd; team: strin
       {loading && !data ? <Loading /> : null}
       {data ? (
         <Card title={kind === 'app' ? 'Apps' : 'Websites'}>
-          {data.length === 0 ? <Empty text={`No ${noun}s used in this period.`} /> : null}
+          {data.length === 0 ? <Empty text={`No ${noun}s used in this period.`} /> : (
+            <ColumnChart points={softwareChart(data)?.points ?? []} />
+          )}
           {data.map((r) => {
             const key = `${kind}:${r.name.toLowerCase()}`;
             const seats = licences ? r.licence_seats : null;

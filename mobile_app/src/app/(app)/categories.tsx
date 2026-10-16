@@ -16,7 +16,7 @@ export default function Categories() {
   const profile = useProfile();
   const { data, error, loading, refresh } = useAsync(async () => {
     const [rules, { teams, managers }, features] = await Promise.all([api.categoryRules(), api.teams(), api.features()]);
-    return { rules, teams, scope: manageableTeams(teams, managers, profile), teamRules: features.includes('team_categories') };
+    return { rules, teams, scope: manageableTeams(teams, managers, profile), teamRules: features.includes('teams') };
   }, [profile.employeeId]);
   const [scope, setScope] = useState<string>(COMPANY);
   const [kind, setKind] = useState<'app' | 'domain'>('domain');

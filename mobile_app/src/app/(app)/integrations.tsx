@@ -54,6 +54,7 @@ export default function Integrations() {
       </Screen>
     );
   }
+  if (!data.channelsAllowed && !data.apiAllowed) return <Screen />;
 
   async function run(action: () => Promise<unknown>) {
     setActionError(null);
@@ -105,17 +106,15 @@ export default function Integrations() {
         </Card>
       ) : null}
 
+      {data.channelsAllowed ? (
       <Card title="Slack, Teams and webhooks"
-        right={data.channelsAllowed && !adding ? (
+        right={!adding ? (
           <Text style={{ color: colors.primary, fontWeight: '600' }} onPress={() => setAdding(true)}>Add</Text>
         ) : undefined}>
         <Text style={styles.hint}>
           New alerts are posted once an hour, together with the alert emails. Messages contain the employee's name, the kind of alert and
           counts, never file names or window titles. Saved addresses cannot be viewed again, only replaced.
         </Text>
-        {!data.channelsAllowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>Slack and Teams alerts are not included in your plan. Contact Mycroscope to upgrade.</Text>
-        ) : null}
         {adding ? (
           <ChannelEditor onCancel={() => setAdding(false)} onAdded={(secret) => {
             setAdding(false);
@@ -164,28 +163,24 @@ export default function Integrations() {
           </View>
         ))}
       </Card>
+      ) : null}
 
+      {data.apiAllowed ? (
       <Card title="Read-only API">
         <Text style={styles.hint}>
           Lets your own systems (Power BI, payroll, HR) read employees, daily totals, app and website usage, and alerts.
           Keys can only read, never change anything, and cannot see file names or window titles.
         </Text>
-        {!data.apiAllowed ? (
-          <Text style={[styles.hint, { color: colors.danger }]}>The API is not included in your plan. Contact Mycroscope to upgrade.</Text>
-        ) : (
-          <>
-            <Text style={styles.label}>Address</Text>
-            <Text selectable style={[styles.rowText, { fontFamily: 'monospace' }]}>{apiBaseUrl}</Text>
-            <Text selectable style={styles.hint}>
-              GET /employees · /daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD · /usage?from=…&to=… (at most 93 days) ·
-              /alerts?since=ISO time. Send the key in an X-Api-Key header.
-            </Text>
-            <NewKey onCreated={(key) => {
-              setRevealed({ title: 'New API key', value: key, hint: 'Store it in your system\'s secret settings, not in a spreadsheet or email.' });
-              reload();
-            }} />
-          </>
-        )}
+        <Text style={styles.label}>Address</Text>
+        <Text selectable style={[styles.rowText, { fontFamily: 'monospace' }]}>{apiBaseUrl}</Text>
+        <Text selectable style={styles.hint}>
+          GET /employees · /daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD · /usage?from=…&to=… (at most 93 days) ·
+          /alerts?since=ISO time. Send the key in an X-Api-Key header.
+        </Text>
+        <NewKey onCreated={(key) => {
+          setRevealed({ title: 'New API key', value: key, hint: 'Store it in your system\'s secret settings, not in a spreadsheet or email.' });
+          reload();
+        }} />
         {data.keys.length === 0 ? <Empty text="No API keys yet." /> : null}
         {data.keys.map((k) => (
           <View key={k.id} style={[styles.row, { justifyContent: 'space-between', paddingVertical: 8, gap: 8,
@@ -206,6 +201,7 @@ export default function Integrations() {
           </View>
         ))}
       </Card>
+      ) : null}
     </Screen>
   );
 }

@@ -3,13 +3,14 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
 import {
-  Button, Card, Empty, ErrorBanner, Loading, Screen, Segmented, StackedBar, StatGrid, colors, stateColor, styles,
+  Button, Card, ColumnChart, Empty, ErrorBanner, Loading, Screen, Segmented, StackedBar, StatGrid, colors, stateColor, styles,
 } from '@/components/ui';
 import { api, errorMessage, type DailyTotal, type EmployeeRow } from '@/lib/api';
 import { notify } from '@/lib/dialog';
+import { activityChart } from '@/lib/charts';
 import { sharePdf, shareCsv } from '@/lib/export';
 import {
-  PERIOD_LABELS, formatDay, formatDuration, formatTime, htmlEscape, offlineSeconds, percent, periodRange, toCsv, todayIn,
+  PERIOD_LABELS, formatDay, formatDuration, formatTime, offlineSeconds, percent, periodRange, toCsv, todayIn,
   type PeriodKey,
 } from '@/lib/format';
 import { useProfile } from '@/lib/session';
@@ -25,6 +26,17 @@ interface Line {
   offline: number;
   productiveOffline: number;
   daysWorked: number;
+}
+
+function activityPoints(lines: Line[], single: Line | undefined): { label: string; activeSeconds: number }[] {
+  if (single) {
+    const many = single.days.length > 16;
+    return single.days.map((day) => ({
+      label: many ? String(Number(day.day.slice(8, 10))) : formatDay(day.day).replace(/ \d{4}$/, ''),
+      activeSeconds: day.active_seconds,
+    }));
+  }
+  return lines.map((line) => ({ label: line.employee.name, activeSeconds: line.active }));
 }
 
 const ALL = 'all';
@@ -136,25 +148,37 @@ export default function Reports() {
     setExporting('pdf');
     try {
       const table = single
-        ? `<table><tr><th>Day</th><th class="num">Active</th><th class="num">Idle</th><th class="num">Paused</th><th class="num">Away</th><th class="num">Time away</th></tr>
-          ${single.days.map((d) => `<tr><td>${htmlEscape(formatDay(d.day, { weekday: true }))}</td>
-            <td class="num">${formatDuration(d.active_seconds)}</td><td class="num">${formatDuration(d.idle_seconds)}</td>
-            <td class="num">${formatDuration(d.paused_seconds)}</td><td class="num">${formatDuration(d.away_seconds)}</td>
-            <td class="num">${formatDuration(offlineSeconds(d))}</td></tr>`).join('')}
-          </table>`
-        : `<table><tr><th>Employee</th><th class="num">Active</th><th class="num">Idle</th><th class="num">Paused</th>
-          <th class="num">Days active</th><th class="num">Active share</th></tr>
-          ${data.map((l) => `<tr><td>${htmlEscape(l.employee.name)}</td><td class="num">${formatDuration(l.active)}</td>
-            <td class="num">${formatDuration(l.idle)}</td><td class="num">${formatDuration(l.paused)}</td>
-            <td class="num">${l.daysWorked}</td><td class="num">${percent(l.active, l.active + l.idle)}</td></tr>`).join('')}
-          </table>`;
-      const body = `<p class="muted">${htmlEscape(profile.organizationName)} · ${htmlEscape(subtitle)} · times in ${htmlEscape(profile.timezone)}</p>
-        <p>Total: ${formatDuration(totals.active)} active · ${formatDuration(totals.idle)} idle · ${formatDuration(totals.paused)} paused · ${formatDuration(totals.offline)} time away (${formatDuration(totals.productiveOffline)} counted as productive)</p>
-        <p class="muted">Time away is what people said an idle or away stretch was. It is left out when a project is selected. Productive reasons are added in Insights and towards goals.</p>
-        ${table}<p class="muted">Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC by ${htmlEscape(profile.name)}.
-        Active = keyboard/mouse input within the idle threshold. Contains personal information: handle under POPIA.</p>`;
+        ? {
+          headers: ['Day', 'Active', 'Idle', 'Paused', 'Away', 'Time away'],
+          rows: single.days.map((d) => [
+            formatDay(d.day, { weekday: true }),
+            formatDuration(d.active_seconds), formatDuration(d.idle_seconds), formatDuration(d.paused_seconds),
+            formatDuration(d.away_seconds), formatDuration(offlineSeconds(d)),
+          ]),
+          numericFrom: 1,
+        }
+        : {
+          headers: ['Employee', 'Active', 'Idle', 'Paused', 'Days active', 'Active share'],
+          rows: data.map((l) => [
+            l.employee.name, formatDuration(l.active), formatDuration(l.idle), formatDuration(l.paused),
+            String(l.daysWorked), percent(l.active, l.active + l.idle),
+          ]),
+          numericFrom: 1,
+        };
+      const chart = activityChart(activityPoints(data, single), !single);
       await logExport('pdf');
-      await sharePdf(title, body);
+      await sharePdf(`mycroscope_activity_${range.from}_${range.to}`, {
+        kicker: profile.organizationName,
+        title: 'Activity report',
+        subtitle: `${title} · ${subtitle} · times in ${profile.timezone}`,
+        intro: `Total: ${formatDuration(totals.active)} active, ${formatDuration(totals.idle)} idle, ${formatDuration(totals.paused)} paused, and ${formatDuration(totals.offline)} time away, of which ${formatDuration(totals.productiveOffline)} was counted as productive.`,
+        charts: chart ? [chart] : [],
+        table,
+        notes: [
+          'Time away is what people said an idle or away stretch was. It is left out when a project is selected. Reasons marked productive are added to productive time.',
+        ],
+        notice: `Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC by ${profile.name}. Active means keyboard or mouse input within the idle threshold. Contains personal information. Handle it under POPIA.`,
+      });
     } catch (e) {
       notify('Export failed', errorMessage(e));
     } finally {
@@ -162,6 +186,7 @@ export default function Reports() {
     }
   }
 
+  const chart = data ? activityChart(activityPoints(data, single), !single) : null;
   const max = Math.max(1, ...(data ?? []).map((l) => l.active + l.idle + l.paused));
   const dayMax = Math.max(1, ...(single?.days ?? []).map((d) => d.active_seconds + d.idle_seconds + d.paused_seconds));
 
@@ -206,11 +231,16 @@ export default function Reports() {
             { label: 'Paused', value: formatDuration(totals.paused), color: stateColor.paused },
             { label: 'Time away', value: formatDuration(totals.offline) },
           ]} />
+          {chart ? (
+            <Card title={chart.title}>
+              <ColumnChart points={chart.points} />
+            </Card>
+          ) : null}
           <Text style={styles.hint}>
             Time away is what people said an idle or away stretch was, so it also sits inside idle or away.
             {projectId
               ? ' A project report leaves it out, because it is not tied to a project.'
-              : ` ${formatDuration(totals.productiveOffline)} of it counts as productive in Insights and towards goals.`}
+              : ` ${formatDuration(totals.productiveOffline)} of it is counted as productive.`}
           </Text>
           {single ? (
             <Card title={`${single.employee.name} · by day`}>

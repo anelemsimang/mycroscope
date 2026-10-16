@@ -1,0 +1,64 @@
+# Mycroscope web app and public site.
+# Copy .env.example to .env and fill in the three EXPO_PUBLIC values before building.
+# The database, sign-in and edge functions stay on Supabase. The Windows desktop app is not a container.
+
+name: mycroscope
+
+services:
+  app:
+    build:
+      context: ./mobile_app
+      args:
+        EXPO_PUBLIC_SUPABASE_URL: ${EXPO_PUBLIC_SUPABASE_URL}
+        EXPO_PUBLIC_SUPABASE_ANON_KEY: ${EXPO_PUBLIC_SUPABASE_ANON_KEY}
+        EXPO_PUBLIC_WEB_URL: ${EXPO_PUBLIC_WEB_URL:-}
+    image: mycroscope-app
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  site:
+    build:
+      context: ./site
+    image: mycroscope-site
+    depends_on:
+      inbox:
+        condition: service_healthy
+    ports:
+      - "${SITE_PORT:-8081}:8080"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  inbox:
+    build:
+      context: ./site/inbox
+    image: mycroscope-inbox
+    volumes:
+      - support-inbox:/data
+    restart: unless-stopped
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  support-inbox:

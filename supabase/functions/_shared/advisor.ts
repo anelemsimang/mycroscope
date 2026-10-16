@@ -274,6 +274,16 @@ function findingsFor(template: ReportTemplate, figures: ReportFigures): Finding[
   return found.filter((item) => item.lead.trim() !== '');
 }
 
+export const REPORT_ORDER: ReportTemplate[] = ['week', 'workload', 'software', 'capacity', 'trend'];
+
+/** One written section for each report type, from the same figures. */
+export function writeAllReports(figures: ReportFigures): { title: string; answer: string }[] {
+  return REPORT_ORDER.map((template) => ({
+    title: REPORT_TITLES[template],
+    answer: writeReport(template, figures),
+  }));
+}
+
 /** Writes one report. The strongest threshold decides the opening; every number comes from the figures. */
 export function writeReport(template: ReportTemplate, figures: ReportFigures): string {
   const heading = `${REPORT_TITLES[template]}. ${period(figures)}.`;

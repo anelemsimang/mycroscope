@@ -1,0 +1,10 @@
+{
+  "name": "Mycroscope",
+  "short_name": "Mycroscope",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#f8fafc",
+  "theme_color": "#1e3a8a",
+  "lang": "en-ZA",
+  "icons": [{ "src": "assets/favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

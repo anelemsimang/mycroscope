@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test schema.test.mjs && npm run test:functions",
-    "test:functions": "node --test --experimental-strip-types ../functions/_shared/shared.test.ts"
+    "test:functions": "node --test --experimental-strip-types ../functions/_shared/shared.test.ts ../functions/_shared/yoco.test.ts"
   },
   "keywords": [],
   "author": "",

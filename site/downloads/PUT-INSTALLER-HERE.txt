@@ -1,0 +1,2 @@
+Place the Windows installer in this folder and name it Mycroscope-Setup.exe before publishing the site.
+The download page links to that exact file name.

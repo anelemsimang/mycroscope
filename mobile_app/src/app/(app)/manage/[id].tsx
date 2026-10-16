@@ -18,7 +18,11 @@ export default function ManageEmployee() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const profile = useProfile();
   const { data: emp, error: loadError, reload } = useAsync(() => api.employee(id), [id]);
-  const teams = useAsync(async () => (profile.role === 'owner' ? (await api.teams()).teams : []), [profile.role]);
+  const teams = useAsync(async () => {
+    if (profile.role !== 'owner') return [];
+    const [features, listed] = await Promise.all([api.features(), api.teams()]);
+    return features.includes('teams') ? listed.teams : [];
+  }, [profile.role]);
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('employee');
   const [active, setActive] = useState(true);
