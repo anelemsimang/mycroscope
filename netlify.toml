@@ -8,6 +8,9 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # The project address and the anon key are compiled into the public dashboard.
+  # Netlify still scans every other environment value.
+  SECRETS_SCAN_OMIT_KEYS = "EXPO_PUBLIC_SUPABASE_URL,EXPO_PUBLIC_SUPABASE_ANON_KEY"
 
 # Clean addresses. The files stay as .html. The browser shows /pricing.
 # These rules come before the dashboard catch-all.
