@@ -153,6 +153,8 @@ footer a { color: #fff; text-decoration: none; }
 .order dt { color: var(--muted); }
 .order dd { margin: 0; font-weight: 700; }
 .due { font-size: 2rem; font-weight: 800; color: var(--navy); margin: 0.2rem 0 0.8rem; }
+.seat-qty { display: flex; align-items: center; gap: 0.7rem; margin: 0.8rem 0; }
+.seat-qty input { width: 5.5rem; font: inherit; padding: 0.45rem 0.6rem; border: 1px solid var(--line); border-radius: 8px; }
 .banner { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 12px; padding: 0.8rem 1rem; }
 .banner.error { background: #fee2e2; border-color: #fecaca; }
 button.button { border: 0; cursor: pointer; font: inherit; }

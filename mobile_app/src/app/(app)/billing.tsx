@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { ServiceBanner } from '@/components/ServiceBanner';
-import { Button, Card, Empty, ErrorBanner, Loading, Pill, Screen, colors, styles } from '@/components/ui';
-import { api, type Feature, type Invoice, type PlanCatalogueEntry, errorMessage } from '@/lib/api';
+import { Button, Card, Empty, ErrorBanner, Field, Loading, Pill, Screen, colors, styles } from '@/components/ui';
+import { api, type Feature, type Invoice, type PlanCatalogueEntry, type PurchasedSeat, errorMessage } from '@/lib/api';
 import { confirmAction, shareText } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
 import { useProfile, useSession } from '@/lib/session';
@@ -76,6 +76,27 @@ function includedLines(plan: PlanCatalogueEntry): string[] {
   return [...BASICS, ...FEATURES.filter((feature) => granted.has(feature.key)).map((feature) => feature.label)];
 }
 
+function groupSeats(seats: PurchasedSeat[]) {
+  const groups = new Map<string, {
+    period_end: string; total: number; scheduled: number;
+    removable: PurchasedSeat | null; kept: PurchasedSeat | null;
+  }>();
+  for (const seat of seats) {
+    const group = groups.get(seat.period_end) ?? {
+      period_end: seat.period_end, total: 0, scheduled: 0, removable: null, kept: null,
+    };
+    group.total += 1;
+    if (seat.cancel_at_period_end) {
+      group.scheduled += 1;
+      group.kept ??= seat;
+    } else {
+      group.removable ??= seat;
+    }
+    groups.set(seat.period_end, group);
+  }
+  return [...groups.values()];
+}
+
 function invoiceText(invoice: Invoice, timezone: string): string {
   const lines = [
     `Invoice ${invoice.number}`,
@@ -89,7 +110,7 @@ function invoiceText(invoice: Invoice, timezone: string): string {
     '',
     `Bill to: ${invoice.organization_name}`,
     invoice.description,
-    `${invoice.seats} people`,
+    `${invoice.seats} seats`,
     `Net ${formatMoney(invoice.net_cents)}`,
   ];
   if (invoice.vat_enabled) lines.push(`VAT ${formatMoney(invoice.vat_cents)}`);
@@ -102,24 +123,62 @@ export default function Billing() {
   const { reloadService } = useSession();
   const isOwner = profile.role === 'owner';
   const { data, error, loading, refreshing, refresh } = useAsync(async () => {
-    const [service, payments, catalogue, invoices] = await Promise.all([
+    const [service, payments, catalogue, invoices, seats] = await Promise.all([
       api.serviceStatus(), api.payments(), api.planCatalogue(), isOwner ? api.invoices() : Promise.resolve([]),
+      api.purchasedSeats().catch(() => [] as PurchasedSeat[]),
     ]);
     await reloadService();
-    return { service, payments, catalogue, invoices };
+    return { service, payments, catalogue, invoices, seats };
   }, [isOwner]);
   const [busy, setBusy] = useState<string | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
+  const [addSeats, setAddSeats] = useState('1');
 
   if (loading && !data) return <Loading />;
   if (!data?.service) return <Screen><ErrorBanner message={error ?? 'Could not load the subscription.'} onRetry={refresh} /></Screen>;
   const s = data.service;
   const plan = data.catalogue.find((p) => p.key === s.plan) ?? null;
   const pending = data.catalogue.find((p) => p.key === s.pending_plan) ?? null;
-  const people = Math.max(1, s.seats_used);
+  const purchased = Math.max(0, s.seats);
+  const seatGroups = groupSeats(data.seats);
 
   function reviewPurchase(target: PlanCatalogueEntry) {
-    openWebsiteCheckout(target.key);
+    const adding = target.key === s.plan;
+    const count = Number(addSeats);
+    const seats = adding && Number.isInteger(count) && count > 0 ? count : Math.max(1, s.seats_used);
+    openWebsiteCheckout(target.key, seats);
+  }
+
+  async function scheduleRemoval(seat: PurchasedSeat) {
+    setPayError(null);
+    const ok = await confirmAction(
+      'Remove this seat',
+      `It stays available until ${formatDate(seat.period_end, profile.timezone)}. Nothing is refunded.`,
+      'Schedule removal',
+    );
+    if (!ok) return;
+    setBusy(seat.id);
+    try {
+      await api.scheduleSeatRemoval(seat.id);
+      await refresh();
+    } catch (e) {
+      setPayError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function keepSeat(seat: PurchasedSeat) {
+    setPayError(null);
+    setBusy(seat.id);
+    try {
+      await api.keepSeat(seat.id);
+      await refresh();
+    } catch (e) {
+      setPayError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function scheduleChange(target: PlanCatalogueEntry) {
@@ -162,7 +221,9 @@ export default function Billing() {
             <Text style={styles.hint}>
               {STATUS_LABEL[s.status] ?? s.status}
               {' · '}
-              {plan?.seat_cap == null ? `${s.seats_used} people` : `${s.seats_used} of ${plan.seat_cap} people`}
+              {s.plan === 'free'
+                ? `${s.seats_used} of ${plan?.seat_cap ?? 3} people`
+                : `${s.seats_used} of ${purchased} purchased seats in use`}
               {plan ? ` · ${plan.retention_label} of activity` : ''}
               {s.plan !== 'free' && s.current_period_end
                 ? ` · ${s.status === 'past_due' ? 'was paid until' : 'paid until'} ${formatDate(s.current_period_end, profile.timezone)}`
@@ -172,8 +233,8 @@ export default function Billing() {
           </View>
           {plan && plan.net_price_cents > 0 ? (
             <View style={{ alignItems: 'flex-end' }}>
-              <Text style={local.summaryPrice}>{rands(Number(plan.gross_price_cents) * 12 * people)}</Text>
-              <Text style={styles.hint}>per year for {people} {people === 1 ? 'person' : 'people'}{plan.vat_enabled ? ', with VAT' : ''}</Text>
+              <Text style={local.summaryPrice}>{rands(Number(plan.gross_price_cents) * 12)}</Text>
+              <Text style={styles.hint}>per seat, per year{plan.vat_enabled ? ', with VAT' : ''}</Text>
             </View>
           ) : null}
         </View>
@@ -181,6 +242,33 @@ export default function Billing() {
       </Card>
 
       {payError ? <ErrorBanner message={payError} /> : null}
+
+      {isOwner && plan && plan.net_price_cents > 0 ? (
+        <Card title="Purchased seats">
+          <Text style={styles.hint}>
+            Each seat runs for its own year from the day it was paid. Adding a seat charges that year, with VAT.
+            Removing a seat waits until that seat's end date. Nothing is refunded.
+          </Text>
+          {seatGroups.length === 0 ? <Empty text="No seats are in their paid year." /> : seatGroups.map((group) => (
+            <View key={group.period_end} style={{ gap: 6, paddingVertical: 8 }}>
+              <Text style={styles.rowText}>
+                {group.total} {group.total === 1 ? 'seat' : 'seats'} until {formatDate(group.period_end, profile.timezone)}
+                {group.scheduled > 0 ? ` · ${group.scheduled} scheduled to end` : ''}
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {group.removable ? (
+                  <Button title="Remove one seat at its end date" variant="secondary" onPress={() => scheduleRemoval(group.removable!)} loading={busy === group.removable?.id} />
+                ) : null}
+                {group.kept ? (
+                  <Button title="Keep one scheduled seat" variant="ghost" onPress={() => keepSeat(group.kept!)} loading={busy === group.kept?.id} />
+                ) : null}
+              </View>
+            </View>
+          ))}
+          <Field label="Seats to add" value={addSeats} onChangeText={setAddSeats} keyboardType="number-pad" hint="Each new seat is billed for one year, with VAT." />
+          <Button title="Buy seats on the website" onPress={() => reviewPurchase(plan)} />
+        </Card>
+      ) : null}
 
       <View style={local.grid}>
         {data.catalogue.map((item) => {
@@ -209,7 +297,7 @@ export default function Billing() {
                 </Text>
               ) : null}
               <Text style={local.meta}>
-                {item.seat_cap == null ? 'Unlimited people' : `${item.seat_cap} people`} · {item.retention_label} of activity
+                {item.net_price_cents === 0 ? `${item.seat_cap ?? 3} people` : 'Billed per seat you buy'} · {item.retention_label} of activity
               </Text>
               <View style={local.rule} />
               {includedLines(item).map((line) => (
@@ -238,8 +326,9 @@ export default function Billing() {
         })}
       </View>
       <Text style={styles.hint}>
-        You pay once a year on the website. The card form is on Yoco's page. The yearly amount is 12 times the monthly price, with VAT, for every active person, including managers. A person you deactivate is not billed on the next year.
-        An upgrade starts as soon as the payment is confirmed. A downgrade or cancellation starts when this year ends, and extra people are paused rather than removed.
+        You choose how many seats to buy. The card form is on Yoco's page. A seat is the monthly price times 12, with VAT, for one year from the day it is paid.
+        A seat added later has its own year. Removing a seat waits until that seat's end date, and nothing is refunded.
+        An upgrade charges the price difference for the days left on each seat you already have. A downgrade starts when the last seat's year ends, and extra people are paused rather than removed.
       </Text>
       {!isOwner ? <Text style={styles.hint}>Only the organisation owner can change the plan or pay.</Text> : null}
 
@@ -262,7 +351,7 @@ export default function Billing() {
       <Card title="Payments">
         {data.payments.length === 0 ? <Empty text="No payments yet." /> : data.payments.map((p) => (
           <Text key={p.reference} style={styles.rowText}>
-            {formatDateTime(p.paid_at, profile.timezone)} · {formatMoney(p.amount_cents, p.currency)} · {p.seats} people
+            {formatDateTime(p.paid_at, profile.timezone)} · {formatMoney(p.amount_cents, p.currency)} · {p.seats} seats
           </Text>
         ))}
       </Card>

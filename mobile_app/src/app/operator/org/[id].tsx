@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import {
   Button, Card, Empty, ErrorBanner, Field, InfoGrid, Loading, Pill, Screen, Segmented, colors, styles,
 } from '@/components/ui';
-import { api, operatorApi, type OperatorOrg, type PlanCatalogueEntry } from '@/lib/api';
+import { api, operatorApi, type OperatorOrg, type PlanCatalogueEntry, type PurchasedSeat } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatRelative } from '@/lib/format';
 import { planName, statusLine, statusName, supportOpen } from '@/lib/operator';
@@ -20,11 +20,13 @@ const STATUS_LABEL: Record<(typeof STATUSES)[number], string> = {
 export default function OperatorOrgScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, loading, refreshing, refresh, reload } = useAsync(async () => {
-    const [orgs, plans] = await Promise.all([operatorApi.organizations(), api.planCatalogue()]);
+    const [orgs, plans, seats] = await Promise.all([
+      operatorApi.organizations(), api.planCatalogue(), operatorApi.seats(id).catch(() => [] as PurchasedSeat[]),
+    ]);
     const org = orgs.find((o) => o.organization_id === id) ?? null;
     const open = !!org && supportOpen(org);
     const snapshot = open ? await operatorApi.supportSnapshot(id) : null;
-    return { org, snapshot, supportOpen: open, plans };
+    return { org, snapshot, supportOpen: open, plans, seats };
   }, [id]);
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
@@ -57,7 +59,9 @@ export default function OperatorOrgScreen() {
         <InfoGrid items={[
           { label: 'Owner', value: `${org.owner_name ?? '–'}${org.owner_email ? ` · ${org.owner_email}` : ''}` },
           { label: 'Signed up', value: formatDate(org.created_at) },
-          { label: 'People', value: cap === null ? `${org.active_employees} active` : `${org.active_employees} of ${cap}` },
+          { label: 'People', value: org.plan === 'free'
+            ? `${org.active_employees} of ${cap ?? 3}`
+            : `${org.active_employees} of ${org.seats ?? 0} purchased seats` },
           { label: 'Installed agents', value: String(org.activated_employees) },
           { label: 'Seen in 2 min', value: String(org.agents_online) },
           { label: 'Last check-in', value: org.last_activity_at ? formatRelative(org.last_activity_at) : 'never' },
@@ -68,6 +72,7 @@ export default function OperatorOrgScreen() {
             : `${org.agents_online} of ${org.activated_employees} installed agents checked in during the last 2 minutes.`}
         </Text>
       </Card>
+      <SeatCard seats={data?.seats ?? []} />
       <SubscriptionEditor org={org} plans={data?.plans ?? []} onSaved={refresh} />
       <SupportCard org={org} snapshot={data?.snapshot ?? null} open={!!data?.supportOpen} />
       {org.status === 'cancelled' ? <DeleteCard org={org} /> : null}
@@ -122,8 +127,8 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
   return (
     <Card title="Subscription">
       <Text style={styles.hint}>
-        Seats and the paid-until date are set when a payment is confirmed. That payment covers one year from the confirmation.
-        An upgrade during the year keeps the same end date.
+        Seats are created when a payment is confirmed. Seats bought together share an end date. A seat added later has its own year.
+        Changing the plan here does not add seats. Moving the account to Free ends the purchased seats.
       </Text>
       <Text style={styles.label}>Plan</Text>
       <Segmented options={(plans.length ? plans : [{ key: plan, name: plan }]).map((p) => ({ value: p.key, label: p.name }))} value={plan as never}
@@ -135,6 +140,30 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
         multiline />
       {err ? <ErrorBanner message={err} /> : null}
       <Button title="Save changes" onPress={save} disabled={!changed} loading={saving} />
+    </Card>
+  );
+}
+
+function SeatCard({ seats }: { seats: PurchasedSeat[] }) {
+  const groups = new Map<string, { end: string; total: number; scheduled: number }>();
+  for (const seat of seats) {
+    const group = groups.get(seat.period_end) ?? { end: seat.period_end, total: 0, scheduled: 0 };
+    group.total += 1;
+    if (seat.cancel_at_period_end) group.scheduled += 1;
+    groups.set(seat.period_end, group);
+  }
+  const rows = [...groups.values()];
+  return (
+    <Card title="Purchased seats">
+      <Text style={styles.hint}>
+        Each row is a group of seats that end on the same date. A scheduled seat stays until that date and is not billed again.
+      </Text>
+      {rows.length === 0 ? <Empty text="No seats are in their paid year." /> : rows.map((row) => (
+        <Text key={row.end} style={styles.rowText}>
+          {row.total} {row.total === 1 ? 'seat' : 'seats'} until {formatDate(row.end, ZONE)}
+          {row.scheduled > 0 ? ` · ${row.scheduled} scheduled to end` : ''}
+        </Text>
+      ))}
     </Card>
   );
 }

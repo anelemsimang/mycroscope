@@ -72,11 +72,11 @@ Deno.serve(async (req) => {
     const text = [
       `Hello ${row.owner_name ?? 'there'},`,
       '',
-      `Your Mycroscope ${row.plan_name} year has ended. The plan stays available for a few more days.`,
-      `The amount due is R${rands}.`,
-      payUrl ? `Pay here: ${payUrl}` : 'Open the billing page in Mycroscope to pay.',
+      `Some ${row.plan_name} seats end on ${new Date(row.period_end).toLocaleDateString('en-ZA', { timeZone: 'Africa/Johannesburg' })}.`,
+      `The amount to keep those seats for another year is R${rands}, with VAT. Each renewed seat runs for one year from the payment.`,
+      payUrl ? `Pay here: ${payUrl}` : 'Open checkout on the Mycroscope website to pay.',
       '',
-      'If the payment is not made, the account moves to the Free plan. People and history are not deleted.',
+      'Seats you do not renew end on that date. People and history are not deleted.',
     ].join('\n');
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',

@@ -36,7 +36,7 @@ export function attentionReasons(o: OperatorOrg, now = Date.now(), cap: number |
   const reasons: Attention[] = [];
   if (o.status === 'past_due') reasons.push({ code: 'past_due', label: 'Payment overdue' });
   if (o.level === 'read_only') reasons.push({ code: 'read_only', label: 'Recording stopped' });
-  if (cap !== null && o.active_employees > cap) reasons.push({ code: 'seats', label: 'More people than the plan allows' });
+  if (cap !== null && o.active_employees > cap) reasons.push({ code: 'seats', label: 'More people than the seats allow' });
   const quiet = o.activated_employees > 0 && o.agents_online === 0
     && (!o.last_activity_at || now - Date.parse(o.last_activity_at) > 24 * 3_600_000);
   if (quiet && o.status !== 'cancelled' && o.level !== 'read_only') {

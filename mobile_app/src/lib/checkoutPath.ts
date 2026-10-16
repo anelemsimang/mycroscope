@@ -13,10 +13,22 @@ export function safeCheckoutPath(value: string | null | undefined): string | nul
   if (url.pathname !== '/checkout') return null;
   if (url.username || url.password || url.hash) return null;
   const keys = [...url.searchParams.keys()];
-  if (keys.some((key) => key !== 'plan')) return null;
+  if (keys.some((key) => key !== 'plan' && key !== 'seats')) return null;
   const plan = url.searchParams.get('plan');
   if (plan && !PLANS.has(plan)) return null;
-  return plan ? `/checkout?plan=${plan}` : '/checkout';
+  const seatsRaw = url.searchParams.get('seats');
+  let seats = '';
+  if (seatsRaw !== null) {
+    if (!plan || !/^[1-9]\d{0,4}$/.test(seatsRaw)) return null;
+    const count = Number(seatsRaw);
+    if (count > 10000) return null;
+    seats = String(count);
+  }
+  const params = new URLSearchParams();
+  if (plan) params.set('plan', plan);
+  if (seats) params.set('seats', seats);
+  const query = params.toString();
+  return query ? `/checkout?${query}` : '/checkout';
 }
 
 export const CHECKOUT_NEXT_KEY = 'mycroscope-checkout-next';

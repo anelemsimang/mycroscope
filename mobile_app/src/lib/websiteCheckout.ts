@@ -20,7 +20,13 @@ export function openWebsite(path: string): void {
   void Linking.openURL(url);
 }
 
-export function openWebsiteCheckout(plan?: string): void {
-  const safe = plan ? safeCheckoutPath(`/checkout?plan=${plan}`) : '/checkout';
+export function openWebsiteCheckout(plan?: string, seats?: number): void {
+  const count = seats && Number.isInteger(seats) && seats > 0 && seats <= 10000 ? seats : undefined;
+  const path = !plan
+    ? '/checkout'
+    : count
+      ? `/checkout?plan=${plan}&seats=${count}`
+      : `/checkout?plan=${plan}`;
+  const safe = safeCheckoutPath(path);
   openWebsite(safe ?? '/pricing');
 }

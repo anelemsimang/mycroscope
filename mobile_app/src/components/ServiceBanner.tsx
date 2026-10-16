@@ -22,18 +22,21 @@ export function serviceMessage(s: ServiceStatus | null, timezone: string, now = 
   if (s.pending_plan) {
     return { text: `A plan change is scheduled for ${formatDate(s.current_period_end, timezone)}. You keep the current plan until then.`, tone: 'info' };
   }
+  if (s.plan !== 'free' && s.seat_cap !== null && s.seats_used >= s.seat_cap) {
+    return { text: `All ${s.seat_cap} purchased seats are in use. Buy another seat to add someone.`, tone: 'warning' };
+  }
   if (s.seat_cap !== null && s.seats_used >= s.seat_cap) {
-    return { text: `This plan includes ${s.seat_cap} people, and all of them are in use. Upgrade to add more.`, tone: 'warning' };
+    return { text: `This plan includes ${s.seat_cap} people, and all of them are in use. Move to a paid plan to add more.`, tone: 'warning' };
   }
   if (s.plan === 'free') return null;
+  if (s.next_seat_end && Date.parse(s.next_seat_end) - now < 14 * DAY) {
+    return { text: `A purchased seat ends on ${formatDate(s.next_seat_end, timezone)}. It stays until that date. Buy another seat if you still need it.`, tone: 'warning' };
+  }
   if (s.current_period_end && Date.parse(s.current_period_end) < now) {
     return { text: `Payment overdue. This plan stays available until ${formatDate(s.grace_until, timezone)}. After that the account moves to the Free plan. Nothing is deleted.`, tone: 'danger' };
   }
   if (s.current_period_end && Date.parse(s.current_period_end) - now < 7 * DAY) {
-    return { text: `Your subscription renews on ${formatDate(s.current_period_end, timezone)}.`, tone: 'warning' };
-  }
-  if (s.seats_used > s.seats) {
-    return { text: `${s.seats_used} people are active. The next renewal bills all of them.`, tone: 'info' };
+    return { text: `The last purchased seat ends on ${formatDate(s.current_period_end, timezone)}.`, tone: 'warning' };
   }
   return null;
 }

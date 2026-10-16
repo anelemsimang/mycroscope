@@ -53,7 +53,9 @@ export default function OperatorHome() {
 
   const all = data?.orgs ?? [];
   const plans = data?.plans ?? [];
-  const capOf = (o: OperatorOrg) => plans.find((p) => p.key === o.plan)?.seat_cap ?? null;
+  const capOf = (o: OperatorOrg) => o.plan === 'free' || !o.plan
+    ? plans.find((p) => p.key === (o.plan ?? 'free'))?.seat_cap ?? 3
+    : o.seats ?? 0;
   const counts = useMemo(() => ({
     all: all.length,
     attention: all.filter((o) => needsAttention(o, clock, capOf(o))).length,
@@ -163,7 +165,7 @@ export default function OperatorHome() {
             <Text style={[local.col, local.cName, local.headText]}>Customer</Text>
             <Text style={[local.col, local.cPlan, local.headText]}>Plan</Text>
             <Text style={[local.col, local.cStatus, local.headText]}>Status</Text>
-            <Text style={[local.col, local.cNum, local.headText]}>People</Text>
+            <Text style={[local.col, local.cNum, local.headText]}>People / seats</Text>
             <Text style={[local.col, local.cNum, local.headText]}>Agents</Text>
             <Text style={[local.col, local.cSeen, local.headText]}>Last check-in</Text>
           </View>

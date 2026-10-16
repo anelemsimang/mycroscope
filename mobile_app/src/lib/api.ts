@@ -154,10 +154,18 @@ export interface ServiceStatus {
   seats: number;
   seats_used: number;
   require_mfa: boolean;
-  /** Null when the plan does not cap seats. */
+  /** Free uses the catalogue cap. A paid plan uses the purchased seats that are still in their year. */
   seat_cap: number | null;
   cancel_at_period_end?: boolean;
   pending_plan?: string | null;
+  next_seat_end?: string | null;
+}
+
+export interface PurchasedSeat {
+  id: string;
+  period_start: string;
+  period_end: string;
+  cancel_at_period_end: boolean;
 }
 
 export interface Team { id: string; name: string; office_days_per_week: number | null }
@@ -349,11 +357,12 @@ export interface Payment {
 }
 
 export interface PlanQuote {
-  kind: 'new' | 'renewal' | 'upgrade' | 'downgrade' | 'current';
+  kind: 'new' | 'renewal' | 'upgrade' | 'downgrade' | 'current' | 'seats';
   gross_cents: number;
   net_cents?: number;
   vat_cents?: number;
   seats: number;
+  min_seats?: number;
   plan: string;
   intent_id?: string;
   message?: string;
@@ -675,7 +684,12 @@ export const api = {
   },
 
   /** Preview of a plan change. Nothing is charged and no downgrade is scheduled. */
-  quotePlan: (plan: string) => rpc<PlanQuote>('quote_plan_change', { p_plan: plan, p_commit: false }),
+  quotePlan: (plan: string, seats?: number) => rpc<PlanQuote>('quote_plan_change', {
+    p_plan: plan, p_commit: false, p_seats: seats ?? null,
+  }),
+  purchasedSeats: () => rpc<PurchasedSeat[]>('list_subscription_seats'),
+  scheduleSeatRemoval: (seat: string) => rpc<void>('schedule_seat_removal', { p_seat: seat }),
+  keepSeat: (seat: string) => rpc<void>('keep_subscription_seat', { p_seat: seat }),
 
   /** Schedules a downgrade or cancellation for the end of the paid year. */
   commitPlanChange: (plan: string) => rpc<PlanQuote>('quote_plan_change', { p_plan: plan, p_commit: true }),
@@ -949,6 +963,7 @@ export const api = {
 export const operatorApi = {
   isOperator: () => rpc<boolean>('am_i_platform_admin'),
   organizations: () => rpc<OperatorOrg[]>('op_organizations'),
+  seats: (org: string) => rpc<PurchasedSeat[]>('op_subscription_seats', { p_org: org }),
   health: async () => (await rpc<SystemHealth[]>('op_system_health'))[0],
   audit: (limit = 200) => rpc<OperatorAuditEntry[]>('op_operator_audit', { p_limit: limit }),
   updateSubscription: (org: string, changes: {
