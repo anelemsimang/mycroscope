@@ -21,6 +21,7 @@ node_modules/
 .expo/
 mobile_app/.expo/
 mobile_app/dist/
+publish/
 legacy/admin_dashboard/.next/
 legacy/admin_dashboard/out/
 .netlify/

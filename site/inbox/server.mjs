@@ -58,7 +58,7 @@ const server = http.createServer(async (req, res) => {
   try {
     const params = new URLSearchParams(await readBody(req));
     if (clean(params.get('bot-field'), 200)) {
-      send(res, 303, '', { Location: '/support-received.html' });
+      send(res, 303, '', { Location: '/support-received' });
       return;
     }
     const name = clean(params.get('name'), 120);
@@ -79,7 +79,7 @@ const server = http.createServer(async (req, res) => {
       message,
     });
     await store(`${row}\n`);
-    send(res, 303, '', { Location: '/support-received.html' });
+    send(res, 303, '', { Location: '/support-received' });
   } catch (error) {
     const status = error.status === 413 ? 413 : 400;
     send(res, status, status === 413 ? 'That question is too long.\n' : 'The question could not be read.\n');

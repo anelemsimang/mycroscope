@@ -23,19 +23,19 @@ Prices are per person, per month, before VAT, and the card payment covers one ye
 ## Pages
 
 - [Home](https://mycroscope.netlify.app/)
-- [Features](https://mycroscope.netlify.app/features.html)
-- [How it works](https://mycroscope.netlify.app/how-it-works.html)
-- [Pricing](https://mycroscope.netlify.app/pricing.html)
-- [Download for Windows](https://mycroscope.netlify.app/download.html)
-- [Privacy policy](https://mycroscope.netlify.app/privacy.html)
-- [Terms of service](https://mycroscope.netlify.app/terms.html)
-- [FAQ](https://mycroscope.netlify.app/faq.html)
+- [Features](https://mycroscope.netlify.app/features)
+- [How it works](https://mycroscope.netlify.app/how-it-works)
+- [Pricing](https://mycroscope.netlify.app/pricing)
+- [Download for Windows](https://mycroscope.netlify.app/download)
+- [Privacy policy](https://mycroscope.netlify.app/privacy)
+- [Terms of service](https://mycroscope.netlify.app/terms)
+- [FAQ](https://mycroscope.netlify.app/faq)
 - [Blog](https://mycroscope.netlify.app/blog/)
-- [What Mycroscope records](https://mycroscope.netlify.app/blog/what-mycroscope-records.html)
-- [Yearly billing](https://mycroscope.netlify.app/blog/yearly-billing.html)
-- [How to read the charts](https://mycroscope.netlify.app/blog/reading-the-charts.html)
-- [Monitoring notice](https://mycroscope.netlify.app/blog/monitoring-notice.html)
-- [Support](https://mycroscope.netlify.app/support.html)
+- [What Mycroscope records](https://mycroscope.netlify.app/blog/what-mycroscope-records)
+- [Yearly billing](https://mycroscope.netlify.app/blog/yearly-billing)
+- [How to read the charts](https://mycroscope.netlify.app/blog/reading-the-charts)
+- [Monitoring notice](https://mycroscope.netlify.app/blog/monitoring-notice)
+- [Support](https://mycroscope.netlify.app/support)
 
 ## Do not invent
 

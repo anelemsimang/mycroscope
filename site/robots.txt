@@ -3,82 +3,82 @@
 
 User-agent: *
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Googlebot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Bingbot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: GPTBot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: ChatGPT-User
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: OAI-SearchBot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Google-Extended
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: anthropic-ai
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: ClaudeBot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Claude-SearchBot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: PerplexityBot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Amazonbot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Applebot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Applebot-Extended
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: Meta-ExternalAgent
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 User-agent: FacebookBot
 Allow: /
-Disallow: /support-received.html
+Disallow: /support-received
 Disallow: /downloads/
 
 Sitemap: https://mycroscope.netlify.app/sitemap.xml

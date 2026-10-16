@@ -1,5 +1,5 @@
 import { authLinkRoute, initialAuthLink } from '@/lib/authLink';
-import { Stack, router, usePathname } from 'expo-router';
+import { Stack, router, usePathname, type Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -32,7 +32,7 @@ export default function RootLayout() {
 }
 
 function RootNavigator() {
-  const { session, isLoading, operator, needsMfaChallenge } = useSession();
+  const { session, isLoading, operator, needsMfaChallenge, isManager } = useSession();
   const signedIn = !!session && !needsMfaChallenge;
   const pathname = usePathname();
   useEffect(() => {
@@ -50,7 +50,11 @@ function RootNavigator() {
     if (!isLoading && signedIn && operator && !legal && !pathname.startsWith('/operator') && !pathname.startsWith('/auth/')) {
       router.replace('/operator');
     }
-  }, [isLoading, signedIn, operator, pathname]);
+    const atDoor = pathname === '/' || pathname === '/sign-in' || pathname === '/sign-up' || pathname === '/forgot-password';
+    if (!isLoading && signedIn && !operator && atDoor) {
+      router.replace((isManager ? '/overview' : '/me') as Href);
+    }
+  }, [isLoading, signedIn, operator, isManager, pathname]);
   if (isLoading) return null;
 
   return (

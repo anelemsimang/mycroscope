@@ -1,4 +1,4 @@
-import { Stack, router } from 'expo-router';
+import { Stack, router, type Href } from 'expo-router';
 import { Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
 
 import { MfaSetup } from '@/components/MfaSetup';
@@ -8,9 +8,8 @@ import { useSession } from '@/lib/session';
 /** Width from which the header offers a direct "All employees" button (desktop browsers, tablets). */
 const WIDE = 768;
 
-function goToDashboard() {
-  if (router.canDismiss()) router.dismissAll();
-  else router.replace('/');
+function goToDashboard(manager: boolean) {
+  router.replace((manager ? '/overview' : '/me') as Href);
 }
 
 function HeaderLink({ label, side, onPress, accessibilityLabel }: {
@@ -62,19 +61,20 @@ export default function AppLayout() {
     headerBackVisible: false,
     headerLeft: () => (
       <HeaderLink side="left" label="‹ Back" accessibilityLabel="Back"
-        onPress={() => (navigation.canGoBack() ? router.back() : goToDashboard())} />
+        onPress={() => (navigation.canGoBack() ? router.back() : goToDashboard(isManager))} />
     ),
     ...(isManager && wide ? {
       headerRight: () => (
-        <HeaderLink side="right" label="☰ All employees" accessibilityLabel="Back to all employees" onPress={goToDashboard} />
+        <HeaderLink side="right" label="☰ All employees" accessibilityLabel="Back to all employees" onPress={() => goToDashboard(true)} />
       ),
     } : {}),
   });
 
   return (
     <Stack screenOptions={headerOptions}>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Protected guard={isManager}>
-        <Stack.Screen name="index" options={{ title: 'Mycroscope Dashboard' }} />
+        <Stack.Screen name="overview" options={{ title: 'Mycroscope Dashboard' }} />
         <Stack.Screen name="reports" options={inner('Professional Report')} />
         <Stack.Screen name="register" options={inner('Register Employee')} />
         <Stack.Screen name="employee/[id]" options={inner('Employee Details')} />

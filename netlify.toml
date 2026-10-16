@@ -1,18 +1,147 @@
-# Older Netlify deploy of the web app. New uploads use docker-compose.yml at the repository root.
-# Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY under Site configuration -> Environment variables;
-# they are compiled into the bundle at build time.
+# One site. https://mycroscope.netlify.app is the public website.
+# /sign-in, /overview and the other app paths load the dashboard (app.html).
+# Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in the Netlify site environment.
+# They are compiled into the dashboard at build time. The hostname stays mycroscope.netlify.app.
 [build]
-  base = "mobile_app"
-  command = "npx expo export --platform web --output-dir dist"
-  publish = "dist"
+  command = "bash scripts/publish-web.sh"
+  publish = "publish"
 
 [build.environment]
   NODE_VERSION = "22"
 
-# Single-page app: every address (e.g. /auth/reset-password from an email) loads the app.
+# Clean addresses. The files stay as .html. The browser shows /pricing.
+# These rules come before the dashboard catch-all.
+[[redirects]]
+  from = "/index.html"
+  to = "/"
+  status = 301
+
+[[redirects]]
+  from = "/blog/index.html"
+  to = "/blog/"
+  status = 301
+
+[[redirects]]
+  from = "/features.html"
+  to = "/features"
+  status = 301
+[[redirects]]
+  from = "/features"
+  to = "/features.html"
+  status = 200
+
+[[redirects]]
+  from = "/how-it-works.html"
+  to = "/how-it-works"
+  status = 301
+[[redirects]]
+  from = "/how-it-works"
+  to = "/how-it-works.html"
+  status = 200
+
+[[redirects]]
+  from = "/pricing.html"
+  to = "/pricing"
+  status = 301
+[[redirects]]
+  from = "/pricing"
+  to = "/pricing.html"
+  status = 200
+
+[[redirects]]
+  from = "/download.html"
+  to = "/download"
+  status = 301
+[[redirects]]
+  from = "/download"
+  to = "/download.html"
+  status = 200
+
+[[redirects]]
+  from = "/faq.html"
+  to = "/faq"
+  status = 301
+[[redirects]]
+  from = "/faq"
+  to = "/faq.html"
+  status = 200
+
+[[redirects]]
+  from = "/support.html"
+  to = "/support"
+  status = 301
+[[redirects]]
+  from = "/support"
+  to = "/support.html"
+  status = 200
+
+[[redirects]]
+  from = "/support-received.html"
+  to = "/support-received"
+  status = 301
+[[redirects]]
+  from = "/support-received"
+  to = "/support-received.html"
+  status = 200
+
+[[redirects]]
+  from = "/terms.html"
+  to = "/terms"
+  status = 301
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+[[redirects]]
+  from = "/privacy.html"
+  to = "/privacy"
+  status = 301
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/what-mycroscope-records.html"
+  to = "/blog/what-mycroscope-records"
+  status = 301
+[[redirects]]
+  from = "/blog/what-mycroscope-records"
+  to = "/blog/what-mycroscope-records.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/yearly-billing.html"
+  to = "/blog/yearly-billing"
+  status = 301
+[[redirects]]
+  from = "/blog/yearly-billing"
+  to = "/blog/yearly-billing.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/reading-the-charts.html"
+  to = "/blog/reading-the-charts"
+  status = 301
+[[redirects]]
+  from = "/blog/reading-the-charts"
+  to = "/blog/reading-the-charts.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/monitoring-notice.html"
+  to = "/blog/monitoring-notice"
+  status = 301
+[[redirects]]
+  from = "/blog/monitoring-notice"
+  to = "/blog/monitoring-notice.html"
+  status = 200
+
+# Existing files (the website) are served as themselves. Every other path is the dashboard.
 [[redirects]]
   from = "/*"
-  to = "/index.html"
+  to = "/app.html"
   status = 200
 
 [[headers]]

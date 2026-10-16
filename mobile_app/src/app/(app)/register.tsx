@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
 import { useState } from 'react';
 import { Text } from 'react-native';
 
@@ -53,7 +53,7 @@ export default function RegisterEmployee() {
       <Screen>
         <ActivationCard name={name.trim()} org={profile.organizationName} result={result} timezone={profile.timezone} />
         <Button title="Register another employee" variant="secondary" onPress={reset} />
-        <Button title="Back to Dashboard" onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))} />
+        <Button title="Back to Dashboard" onPress={() => (router.canGoBack() ? router.back() : router.replace('/overview' as Href))} />
       </Screen>
     );
   }

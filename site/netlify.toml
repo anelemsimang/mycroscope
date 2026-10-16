@@ -1,5 +1,5 @@
-# Public marketing site. Publish this folder as its own Netlify site.
-# Do not point it at the existing app site until sign-in has another address.
+# Copied into the main Netlify site by scripts/publish-web.sh.
+# Do not create a second Netlify site for this folder.
 [build]
   publish = "."
 

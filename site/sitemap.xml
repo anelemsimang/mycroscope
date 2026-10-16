@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://mycroscope.netlify.app/</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/features.html</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/how-it-works.html</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/pricing.html</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/download.html</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/privacy.html</loc><lastmod>2026-10-16</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/terms.html</loc><lastmod>2026-10-16</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/faq.html</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/features</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/how-it-works</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/pricing</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/download</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/privacy</loc><lastmod>2026-10-16</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/terms</loc><lastmod>2026-10-16</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/faq</loc><lastmod>2026-10-15</lastmod></url>
   <url><loc>https://mycroscope.netlify.app/blog/</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/blog/what-mycroscope-records.html</loc><lastmod>2026-10-15</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/blog/yearly-billing.html</loc><lastmod>2026-10-08</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/blog/reading-the-charts.html</loc><lastmod>2026-10-01</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/blog/monitoring-notice.html</loc><lastmod>2026-09-24</lastmod></url>
-  <url><loc>https://mycroscope.netlify.app/support.html</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/blog/what-mycroscope-records</loc><lastmod>2026-10-15</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/blog/yearly-billing</loc><lastmod>2026-10-08</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/blog/reading-the-charts</loc><lastmod>2026-10-01</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/blog/monitoring-notice</loc><lastmod>2026-09-24</lastmod></url>
+  <url><loc>https://mycroscope.netlify.app/support</loc><lastmod>2026-10-15</lastmod></url>
 </urlset>
