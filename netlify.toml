@@ -141,6 +141,42 @@
   to = "/blog/monitoring-notice.html"
   status = 200
 
+[[redirects]]
+  from = "/checkout.html"
+  to = "/checkout"
+  status = 301
+[[redirects]]
+  from = "/checkout"
+  to = "/checkout.html"
+  status = 200
+
+[[redirects]]
+  from = "/checkout-received.html"
+  to = "/checkout-received"
+  status = 301
+[[redirects]]
+  from = "/checkout-received"
+  to = "/checkout-received.html"
+  status = 200
+
+[[redirects]]
+  from = "/checkout-cancelled.html"
+  to = "/checkout-cancelled"
+  status = 301
+[[redirects]]
+  from = "/checkout-cancelled"
+  to = "/checkout-cancelled.html"
+  status = 200
+
+[[redirects]]
+  from = "/checkout-failed.html"
+  to = "/checkout-failed"
+  status = 301
+[[redirects]]
+  from = "/checkout-failed"
+  to = "/checkout-failed.html"
+  status = 200
+
 # Existing files (the website) are served as themselves. Every other path is the dashboard.
 [[redirects]]
   from = "/*"

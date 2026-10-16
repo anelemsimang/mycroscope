@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
@@ -9,6 +8,7 @@ import { confirmAction, shareText } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
 import { useProfile, useSession } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
+import { openWebsiteCheckout } from '@/lib/websiteCheckout';
 
 const STATUS_LABEL = {
   active: 'Active', past_due: 'Payment overdue', lapsed: 'Moved to Free', cancelled: 'Cancelled', suspended: 'Suspended',
@@ -119,7 +119,7 @@ export default function Billing() {
   const people = Math.max(1, s.seats_used);
 
   function reviewPurchase(target: PlanCatalogueEntry) {
-    router.push({ pathname: '/purchase', params: { plan: target.key } });
+    openWebsiteCheckout(target.key);
   }
 
   async function scheduleChange(target: PlanCatalogueEntry) {
@@ -220,7 +220,7 @@ export default function Billing() {
               ))}
               <View style={{ flex: 1 }} />
               {isOwner && !current && higher ? (
-                <Button title="Get plan" onPress={() => reviewPurchase(item)} />
+                <Button title="Pay on the website" onPress={() => reviewPurchase(item)} />
               ) : null}
               {isOwner && !current && lower ? (
                 <Button
@@ -231,14 +231,14 @@ export default function Billing() {
                 />
               ) : null}
               {isOwner && current && item.net_price_cents > 0 && (s.status === 'past_due' || s.status === 'lapsed') ? (
-                <Button title="Pay now" onPress={() => reviewPurchase(item)} />
+                <Button title="Pay on the website" onPress={() => reviewPurchase(item)} />
               ) : null}
             </View>
           );
         })}
       </View>
       <Text style={styles.hint}>
-        You pay once a year. The yearly amount is 12 times the monthly price, with VAT, for every active person, including managers. A person you deactivate is not billed on the next year.
+        You pay once a year on the website. The card form is on Yoco's page. The yearly amount is 12 times the monthly price, with VAT, for every active person, including managers. A person you deactivate is not billed on the next year.
         An upgrade starts as soon as the payment is confirmed. A downgrade or cancellation starts when this year ends, and extra people are paused rather than removed.
       </Text>
       {!isOwner ? <Text style={styles.hint}>Only the organisation owner can change the plan or pay.</Text> : null}

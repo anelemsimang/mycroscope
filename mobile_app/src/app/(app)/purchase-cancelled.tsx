@@ -1,22 +1,24 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
+import { useEffect } from 'react';
 import { Text } from 'react-native';
 
 import { Button, Card, Screen, styles } from '@/components/ui';
+import { openWebsite } from '@/lib/websiteCheckout';
+
+function planParam(value: string | string[] | undefined): string {
+  const plan = Array.isArray(value) ? value[0] : value;
+  return plan ? `?plan=${encodeURIComponent(plan)}` : '';
+}
 
 export default function PurchaseCancelled() {
-  const raw = useLocalSearchParams<{ plan?: string }>().plan;
-  const plan = Array.isArray(raw) ? raw[0] : raw;
+  const query = planParam(useLocalSearchParams<{ plan?: string }>().plan);
+  useEffect(() => { openWebsite(`/checkout-cancelled${query}`); }, [query]);
 
   return (
     <Screen>
-      <Card title="Payment cancelled">
-        <Text style={styles.hint}>
-          You left the payment page before paying. Nothing was charged, and the plan is unchanged.
-        </Text>
-        {plan ? (
-          <Button title="Back to the order" onPress={() => router.replace({ pathname: '/purchase', params: { plan } })} />
-        ) : null}
-        <Button title="View plans" variant="secondary" onPress={() => router.replace('/billing')} />
+      <Card title="Payment is on the website">
+        <Text style={styles.hint}>Opening the payment result on the website.</Text>
+        <Button title="Continue on the website" onPress={() => openWebsite(`/checkout-cancelled${query}`)} />
       </Card>
     </Screen>
   );

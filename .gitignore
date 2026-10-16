@@ -22,6 +22,7 @@ node_modules/
 mobile_app/.expo/
 mobile_app/dist/
 publish/
+site/js/supabase.js
 legacy/admin_dashboard/.next/
 legacy/admin_dashboard/out/
 .netlify/

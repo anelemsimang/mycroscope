@@ -39,10 +39,10 @@ Deno.serve(async (req) => {
 
   let emailed = 0;
   for (const row of rows) {
-    let payUrl = appUrl ? `${appUrl}/billing` : '';
-    const successUrl = appUrl ? `${appUrl}/purchase-received` : '';
-    const cancelUrl = appUrl ? `${appUrl}/purchase-cancelled` : '';
-    const failureUrl = appUrl ? `${appUrl}/purchase-failed` : '';
+    let payUrl = appUrl ? `${appUrl}/checkout` : '';
+    const successUrl = appUrl ? `${appUrl}/checkout-received` : '';
+    const cancelUrl = appUrl ? `${appUrl}/checkout-cancelled` : '';
+    const failureUrl = appUrl ? `${appUrl}/checkout-failed` : '';
     if (yocoKey && !row.yoco_checkout_id) {
       const checkout = await fetch('https://payments.yoco.com/api/checkouts', {
         method: 'POST',

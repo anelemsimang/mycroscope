@@ -53,7 +53,11 @@ export default function SignIn() {
         <Link href="/forgot-password" style={{ color: colors.primary, textAlign: 'right' }}>Forgot password?</Link>
         <View style={[styles.divider, { marginVertical: 16 }]} />
         <Text style={styles.hint}>New to Mycroscope? Create an organisation and become its owner.</Text>
-        <Button title="Create an organisation" variant="secondary" onPress={() => router.push('/sign-up')} />
+        <Button title="Create an organisation" variant="secondary" onPress={() => {
+          const next = Platform.OS === 'web' ? new URLSearchParams(window.location.search).get('next') : null;
+          if (next) router.push({ pathname: '/sign-up', params: { next } });
+          else router.push('/sign-up');
+        }} />
         <Text style={[styles.hint, { marginTop: 12 }]}>
           Employees: install the Mycroscope desktop app on your PC and activate it with the codes from your manager.
         </Text>

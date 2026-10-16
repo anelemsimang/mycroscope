@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en-ZA">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Payment sent | Mycroscope</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="logo" href="/">Mycroscope</a>
+      <nav class="nav" aria-label="Primary"><a href="/pricing">Pricing</a></nav>
+    </div>
+  </header>
+  <main id="main" class="section">
+    <div class="wrap order">
+      <p class="kicker">Payment</p>
+      <h1>Payment sent.</h1>
+      <p>You have been sent back to Mycroscope. This page does not mean the payment is confirmed. The plan updates after the payment succeeds. That usually takes a minute.</p>
+      <p><a class="button" href="/billing">Check billing</a></p>
+      <p><a id="again" href="/pricing">Back to pricing</a></p>
+    </div>
+  </main>
+  <footer><div class="wrap legal"><a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div></footer>
+  <script>
+    const plan = new URLSearchParams(location.search).get('plan');
+    if (plan && /^(work_activity|workforce|productivity)$/.test(plan)) {
+      document.querySelector('#again').href = '/checkout?plan=' + plan;
+      document.querySelector('#again').textContent = 'Get this plan again';
+    }
+  </script>
+</body>
+</html>

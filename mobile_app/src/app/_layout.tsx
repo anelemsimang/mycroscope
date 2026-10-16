@@ -3,9 +3,10 @@ import { Stack, router, usePathname, type Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 import { headerOptions } from '@/components/ui';
+import { clearStoredCheckout, readStoredCheckout, safeCheckoutPath } from '@/lib/checkoutPath';
 import { SessionProvider, useSession } from '@/lib/session';
 import { isConfigured } from '@/lib/supabase';
 
@@ -51,6 +52,14 @@ function RootNavigator() {
       router.replace('/operator');
     }
     const atDoor = pathname === '/' || pathname === '/sign-in' || pathname === '/sign-up' || pathname === '/forgot-password';
+    const checkout = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? safeCheckoutPath(new URLSearchParams(window.location.search).get('next')) ?? readStoredCheckout()
+      : null;
+    if (!isLoading && signedIn && !operator && checkout && (atDoor || pathname === '/mfa')) {
+      clearStoredCheckout();
+      window.location.replace(checkout);
+      return;
+    }
     if (!isLoading && signedIn && !operator && atDoor) {
       router.replace((isManager ? '/overview' : '/me') as Href);
     }
