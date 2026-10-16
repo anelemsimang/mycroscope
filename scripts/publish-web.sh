@@ -5,7 +5,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 rm -rf publish
 npm ci --prefix mobile_app
-npx --prefix mobile_app expo export --platform web --output-dir "$root/publish"
+# Expo looks for package.json in the current directory. The app is in mobile_app.
+cd "$root/mobile_app"
+npx expo export --platform web --output-dir "$root/publish"
+cd "$root"
 mv publish/index.html publish/app.html
 cp -a site/. publish/
 rm -rf publish/inbox publish/Dockerfile publish/.dockerignore publish/netlify.toml
