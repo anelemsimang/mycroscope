@@ -63,6 +63,7 @@ test('only terms signed by checkout are accepted', async () => {
 test('payment return addresses stay on our app', () => {
   const app = 'https://app.mycroscope.co.za';
   assert.equal(safeReturnUrl('https://app.mycroscope.co.za/billing', app), 'https://app.mycroscope.co.za/billing');
+  assert.equal(safeReturnUrl('https://mycroscope.co.za/checkout-received', 'https://mycroscope.netlify.app'), 'https://mycroscope.co.za/checkout-received');
   assert.equal(safeReturnUrl('https://evil.example/billing', app), undefined);
   assert.equal(safeReturnUrl('javascript:alert(1)', app), undefined);
   assert.equal(safeReturnUrl('http://app.mycroscope.co.za/billing', app), undefined);

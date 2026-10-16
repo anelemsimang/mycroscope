@@ -1,7 +1,8 @@
-# One site. https://mycroscope.netlify.app is the public website.
+# One site. https://mycroscope.co.za is the public website.
 # /sign-in, /overview and the other app paths load the dashboard (app.html).
 # Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in the Netlify site environment.
-# They are compiled into the dashboard at build time. The hostname stays mycroscope.netlify.app.
+# They are compiled into the dashboard at build time.
+# The Netlify hostname redirects to the domain.
 [build]
   command = "bash scripts/publish-web.sh"
   publish = "publish"
@@ -11,6 +12,16 @@
   # The project address and the anon key are compiled into the public dashboard.
   # Netlify still scans every other environment value.
   SECRETS_SCAN_OMIT_KEYS = "EXPO_PUBLIC_SUPABASE_URL,EXPO_PUBLIC_SUPABASE_ANON_KEY"
+
+# The old hostname sends people to the domain, including the path they asked for.
+[[redirects]]
+  from = "/*"
+  to = "https://mycroscope.co.za/:splat"
+  status = 301
+  force = true
+
+  [redirects.conditions]
+    Host = ["mycroscope.netlify.app"]
 
 # Clean addresses. The files stay as .html. The browser shows /pricing.
 # These rules come before the dashboard catch-all.

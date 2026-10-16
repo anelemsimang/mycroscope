@@ -18,7 +18,7 @@ employee needs a code from the manager app before they can activate the agent.
 
 ## Step 1. Open the manager app
 
-Go to **https://mycroscope.netlify.app** for the public website, then choose **Get started** or open **https://mycroscope.netlify.app/sign-in**. After you sign in, the dashboard is **https://mycroscope.netlify.app/overview**.
+Go to **https://mycroscope.co.za** for the public website, then choose **Get started** or open **https://mycroscope.co.za/sign-in**. After you sign in, the dashboard is **https://mycroscope.co.za/overview**.
 
 - On a phone you can tap your browser's **Add to Home Screen** to use it like an app.
 
@@ -111,7 +111,7 @@ system tray (near the clock). You can open it any time from the tray icon to pau
 - **Sign-in reminder:** if nobody is signed in while the computer is being used, a reminder window keeps
   appearing until someone signs in. Managers are alerted if a computer is used for 15 minutes with nobody
   signed in.
-- **Your privacy:** employees can sign in at **https://mycroscope.netlify.app/sign-in** to see only their own activity
+- **Your privacy:** employees can sign in at **https://mycroscope.co.za/sign-in** to see only their own activity
   and to send privacy requests (for example, ask for a copy of their data).
 - **Uninstalling:** on a personal computer you can remove it from **Windows Settings → Apps**. Your manager is
   notified when the agent is removed or stops reporting.

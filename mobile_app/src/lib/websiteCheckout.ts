@@ -3,7 +3,7 @@ import { Linking, Platform } from 'react-native';
 import { webAppUrl } from '@/lib/authLink';
 import { safeCheckoutPath } from '@/lib/checkoutPath';
 
-const SITE = 'https://mycroscope.netlify.app';
+const SITE = 'https://mycroscope.co.za';
 
 export function websiteUrl(path: string): string {
   const origin = (webAppUrl() ?? SITE).replace(/\/+$/, '');

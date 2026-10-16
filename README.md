@@ -365,7 +365,7 @@ while tracking is paused.
 opened in Firefox or another browser while the employee is signed in, including after hours and while tracking is paused.
 
 `channel-test` is called by signed-in managers (keep JWT verification on). `api` checks its own keys.
-Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.netlify.app`) so messages link to the app.
+Set `APP_URL` (e.g. `supabase secrets set APP_URL=https://mycroscope.co.za`) so messages link to the app.
 
 Resetting a lost second factor (any user): in Supabase **Authentication -> Users**, open the user and remove
 their MFA factor, after confirming their identity out of band.

@@ -89,9 +89,15 @@ export async function sessionFromLink(client: SupabaseClient, link: AuthLink, ot
   return 'This link is incomplete. Open the most recent link from your email, or request a new one.';
 }
 
+const SITE = 'https://mycroscope.co.za';
+
 /** Base address of the web app, used as the destination of email links. */
 export function webAppUrl(): string | undefined {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (window.location.hostname === 'mycroscope.netlify.app') return SITE;
+    return window.location.origin;
+  }
   const configured = (process.env.EXPO_PUBLIC_WEB_URL ?? '').trim().replace(/\/+$/, '');
-  if (configured) return configured;
-  return Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : undefined;
+  if (!configured || configured === 'https://mycroscope.netlify.app') return SITE;
+  return configured;
 }

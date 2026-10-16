@@ -90,14 +90,17 @@ export function termsFromTransaction(tx: { reference?: unknown; metadata?: unkno
   return terms as CheckoutTerms & { sig: unknown };
 }
 
-/** Only send the payer back to our own app (no open redirects through Paystack). */
+const SITE_HOSTS = new Set(['mycroscope.co.za', 'www.mycroscope.co.za', 'mycroscope.netlify.app']);
+
+/** Only send the payer back to our own app (no open redirects through the card page). */
 export function safeReturnUrl(requested: unknown, appUrl: string | undefined): string | undefined {
   if (typeof requested !== 'string' || !requested) return appUrl ? `${appUrl.replace(/\/+$/, '')}/billing` : undefined;
   try {
     const url = new URL(requested);
     const local = url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1');
     if (url.protocol !== 'https:' && !local) return undefined;
-    if (appUrl && url.origin !== new URL(appUrl).origin && !local) return undefined;
+    const ours = !appUrl || url.origin === new URL(appUrl).origin || SITE_HOSTS.has(url.hostname);
+    if (!local && !ours) return undefined;
     return url.toString();
   } catch {
     return undefined;

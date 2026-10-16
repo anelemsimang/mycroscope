@@ -97,5 +97,5 @@ Disallow: /support-received
 Disallow: /checkout
 Disallow: /downloads/
 
-Sitemap: https://mycroscope.netlify.app/sitemap.xml
-# Plain-language guide for AI systems: https://mycroscope.netlify.app/llms.txt
+Sitemap: https://mycroscope.co.za/sitemap.xml
+# Plain-language guide for AI systems: https://mycroscope.co.za/llms.txt

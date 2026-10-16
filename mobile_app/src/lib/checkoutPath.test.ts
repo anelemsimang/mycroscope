@@ -6,6 +6,7 @@ import { safeCheckoutPath } from './checkoutPath.ts';
 test('checkout return stays on the checkout page', () => {
   assert.equal(safeCheckoutPath('/checkout?plan=work_activity'), '/checkout?plan=work_activity');
   assert.equal(safeCheckoutPath('/checkout'), '/checkout');
+  assert.equal(safeCheckoutPath('https://mycroscope.co.za/checkout?plan=productivity'), '/checkout?plan=productivity');
   assert.equal(safeCheckoutPath('https://mycroscope.netlify.app/checkout?plan=productivity'), '/checkout?plan=productivity');
   assert.equal(safeCheckoutPath('/checkout?plan=work_activity&seats=4'), '/checkout?plan=work_activity&seats=4');
 });

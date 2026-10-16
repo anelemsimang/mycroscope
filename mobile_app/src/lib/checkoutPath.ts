@@ -1,15 +1,16 @@
 const PLANS = new Set(['free', 'work_activity', 'workforce', 'productivity']);
+const HOSTS = new Set(['https://mycroscope.co.za', 'https://mycroscope.netlify.app']);
 
 /** A same-site checkout address, or null. Rejects any other destination. */
 export function safeCheckoutPath(value: string | null | undefined): string | null {
   if (!value) return null;
   let url: URL;
   try {
-    url = new URL(value, 'https://mycroscope.netlify.app');
+    url = new URL(value, 'https://mycroscope.co.za');
   } catch {
     return null;
   }
-  if (url.origin !== 'https://mycroscope.netlify.app') return null;
+  if (!HOSTS.has(url.origin)) return null;
   if (url.pathname !== '/checkout') return null;
   if (url.username || url.password || url.hash) return null;
   const keys = [...url.searchParams.keys()];
