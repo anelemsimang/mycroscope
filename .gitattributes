@@ -1,4 +1,6 @@
 * text=auto
+*.exe binary
+*.dll binary
 
 Dockerfile text eol=lf
 *.dockerignore text eol=lf

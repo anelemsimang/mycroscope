@@ -188,11 +188,25 @@
   to = "/checkout-failed.html"
   status = 200
 
+# A missing installer must not be replaced by the dashboard page. That page was being
+# saved as Mycroscope-Setup.exe, which Windows then reports as corrupted.
+[[redirects]]
+  from = "/downloads/*"
+  to = "/download"
+  status = 404
+
 # Existing files (the website) are served as themselves. Every other path is the dashboard.
 [[redirects]]
   from = "/*"
   to = "/app.html"
   status = 200
+
+[[headers]]
+  for = "/downloads/*"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+    Content-Disposition = "attachment"
+    X-Content-Type-Options = "nosniff"
 
 [[headers]]
   for = "/*"
