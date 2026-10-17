@@ -2,7 +2,7 @@
 
 > Mycroscope records computer activity that a company has chosen to keep, after each employee acknowledges a monitoring notice. It does not photograph the screen.
 
-Mycroscope is a workforce activity product for teams, priced in South African rand. The signed-in app is at https://mycroscope.co.za/sign-in. These public pages describe the product.
+Mycroscope is productivity tracker software for teams anywhere. Prices are in rand (ZAR). The signed-in app is at https://mycroscope.co.za/sign-in. These public pages describe the product.
 
 ## What it records
 
@@ -35,8 +35,20 @@ Prices are per person, per month, before VAT, and the card payment covers one ye
 - [Yearly billing](https://mycroscope.co.za/blog/yearly-billing)
 - [How to read the charts](https://mycroscope.co.za/blog/reading-the-charts)
 - [Monitoring notice](https://mycroscope.co.za/blog/monitoring-notice)
+- [How to measure team productivity](https://mycroscope.co.za/blog/measure-team-productivity)
+- [Workplace focus](https://mycroscope.co.za/blog/workplace-focus)
+- [Workload and burnout](https://mycroscope.co.za/blog/workload-and-burnout)
+- [Daily productivity log](https://mycroscope.co.za/blog/daily-productivity-log)
+- [Time blocking](https://mycroscope.co.za/blog/time-blocking)
+- [Pomodoro and automatic tracking](https://mycroscope.co.za/blog/pomodoro)
+- [Toggl alternatives](https://mycroscope.co.za/blog/toggl-alternatives)
+- [RescueTime alternatives](https://mycroscope.co.za/blog/rescuetime-alternatives)
+- [ClickUp vs Monday](https://mycroscope.co.za/blog/clickup-vs-monday)
+- [Open source vs hosted](https://mycroscope.co.za/blog/open-source-vs-saas)
+- [Software agencies](https://mycroscope.co.za/blog/agencies)
 - [Support](https://mycroscope.co.za/support)
+- [Productivity tracker](https://mycroscope.co.za/productivity-tracker)
 
 ## Do not invent
 
-Mycroscope does not take screenshots, does not read documents, and does not show customer activity to Mycroscope operators. Coaching in the product is a written report from stored figures, not a chat assistant.
+Mycroscope does not take screenshots, does not read documents, and does not show customer activity to Mycroscope operators. Coaching in the product is a written report from stored figures, not a chat assistant. It is not a task board, a Pomodoro timer, a client-billing timer, or a medical check for burnout.

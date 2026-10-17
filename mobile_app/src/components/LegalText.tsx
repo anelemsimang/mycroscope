@@ -15,9 +15,9 @@ export function PrivacyText() {
   return (
     <>
       <Text style={styles.hint}>Effective 16 October 2026</Text>
-      <P>This policy explains what Mycroscope does with personal information. It covers the public website, the signed-in app, and the Windows desktop app. It is written for the Protection of Personal Information Act (POPIA). It is not legal advice for your organisation.</P>
+      <P>This policy explains what Mycroscope does with personal information. It covers the public website, the signed-in app, and the Windows desktop app. It is written for organisations anywhere. Where the Protection of Personal Information Act (POPIA) applies, this policy is meant to meet it. It is not legal advice for your organisation.</P>
       <H>1. Two roles</H>
-      <P>When a company uses Mycroscope to record its people, that company decides why the recording happens and what the monitoring notice says. Under POPIA, that company is the responsible party for the activity records.</P>
+      <P>When a company uses Mycroscope to record its people, that company decides why the recording happens and what the monitoring notice says. That company is responsible for the activity records under the privacy law that applies to it. Where POPIA applies, that company is the responsible party.</P>
       <P>Mycroscope stores and shows those records so the company can run the product. For that activity, Mycroscope is an operator. Mycroscope does not use a customer’s activity to advertise, and Mycroscope staff cannot open the contents of a customer’s activity.</P>
       <P>Mycroscope is the responsible party for its own account, billing, and support records.</P>
       <H>2. Information the product stores</H>
@@ -35,9 +35,9 @@ export function PrivacyText() {
       <H>6. How long it is kept</H>
       <P>Detailed activity is kept for 30 days on Free, 6 months on Work Activity Tracking and Workforce Management, and 12 months on Productivity Optimization. The manager can choose a shorter period. Names and sizes of copied files follow the company’s file-retention setting, from 7 to 365 days, default 30. Invoices are kept for as long as tax and accounting rules require. Deleting the organisation is available only after the subscription is cancelled, and it cannot be undone.</P>
       <H>7. Service providers</H>
-      <P>Supabase runs the database, sign-in, and server functions. The host that runs the Mycroscope containers serves the website and the signed-in web app, and keeps support questions until they are answered. The card payment provider handles the payment page and does not pass the card number to Mycroscope. An email provider sends manager or billing email only when that provider is connected. These providers may process information outside South Africa.</P>
+      <P>Supabase runs the database, sign-in, and server functions. The host that runs the Mycroscope containers serves the website and the signed-in web app, and keeps support questions until they are answered. The card payment provider handles the payment page and does not pass the card number to Mycroscope. An email provider sends manager or billing email only when that provider is connected. These providers may process information in other countries.</P>
       <H>8. Security and rights</H>
-      <P>Access to another person’s record is limited by role and team, and those views are written to the audit log. A manager can require two-factor login for managers. An employee who wants to see, correct, or object to activity should start with their employer. For Mycroscope’s own account, billing, or support records, use the support form. You may also complain to the Information Regulator of South Africa.</P>
+      <P>Access to another person’s record is limited by role and team, and those views are written to the audit log. A manager can require two-factor login for managers. An employee who wants to see, correct, or object to activity should start with their employer. For Mycroscope’s own account, billing, or support records, use the support form. You may also complain to the privacy regulator where you live. In South Africa, that regulator is the Information Regulator.</P>
       <H>9. Children, storage, and changes</H>
       <P>Mycroscope is a workplace product and is not directed at children. The signed-in app stores the sign-in session in the browser. If this policy changes, the new version is posted with a new effective date.</P>
     </>
@@ -50,7 +50,7 @@ export function TermsText() {
     <>
       <Text style={styles.hint}>Effective 16 October 2026</Text>
       <P>These terms are the agreement between Mycroscope and the organisation that opens an account, and they also apply to each person who signs in. By creating an account, installing the desktop app, or paying for a plan, the organisation agrees to these terms and to the privacy policy.</P>
-      <P>The person who creates the account must be allowed to do that for the organisation.</P>
+      <P>An organisation in any country may open an account. Prices in the product are in rand. The person who creates the account must be allowed to do that for the organisation.</P>
       <H>1. The service</H>
       <P>Mycroscope provides a website, a signed-in app, and a Windows desktop app that record computer activity the organisation has described in its monitoring notice. Features depend on the plan. A feature that is not in the plan is hidden. Mycroscope does not photograph the screen and does not give legal, human-resources, or payroll advice. The figures show what was recorded. They are not a finding about a person’s conduct.</P>
       <H>2. Accounts and the desktop app</H>

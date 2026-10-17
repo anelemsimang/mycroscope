@@ -36,6 +36,15 @@
   status = 301
 
 [[redirects]]
+  from = "/productivity-tracker.html"
+  to = "/productivity-tracker"
+  status = 301
+[[redirects]]
+  from = "/productivity-tracker"
+  to = "/productivity-tracker.html"
+  status = 200
+
+[[redirects]]
   from = "/features.html"
   to = "/features"
   status = 301
@@ -150,6 +159,105 @@
 [[redirects]]
   from = "/blog/monitoring-notice"
   to = "/blog/monitoring-notice.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/measure-team-productivity.html"
+  to = "/blog/measure-team-productivity"
+  status = 301
+[[redirects]]
+  from = "/blog/measure-team-productivity"
+  to = "/blog/measure-team-productivity.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/workplace-focus.html"
+  to = "/blog/workplace-focus"
+  status = 301
+[[redirects]]
+  from = "/blog/workplace-focus"
+  to = "/blog/workplace-focus.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/workload-and-burnout.html"
+  to = "/blog/workload-and-burnout"
+  status = 301
+[[redirects]]
+  from = "/blog/workload-and-burnout"
+  to = "/blog/workload-and-burnout.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/daily-productivity-log.html"
+  to = "/blog/daily-productivity-log"
+  status = 301
+[[redirects]]
+  from = "/blog/daily-productivity-log"
+  to = "/blog/daily-productivity-log.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/time-blocking.html"
+  to = "/blog/time-blocking"
+  status = 301
+[[redirects]]
+  from = "/blog/time-blocking"
+  to = "/blog/time-blocking.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/pomodoro.html"
+  to = "/blog/pomodoro"
+  status = 301
+[[redirects]]
+  from = "/blog/pomodoro"
+  to = "/blog/pomodoro.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/toggl-alternatives.html"
+  to = "/blog/toggl-alternatives"
+  status = 301
+[[redirects]]
+  from = "/blog/toggl-alternatives"
+  to = "/blog/toggl-alternatives.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/rescuetime-alternatives.html"
+  to = "/blog/rescuetime-alternatives"
+  status = 301
+[[redirects]]
+  from = "/blog/rescuetime-alternatives"
+  to = "/blog/rescuetime-alternatives.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/clickup-vs-monday.html"
+  to = "/blog/clickup-vs-monday"
+  status = 301
+[[redirects]]
+  from = "/blog/clickup-vs-monday"
+  to = "/blog/clickup-vs-monday.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/open-source-vs-saas.html"
+  to = "/blog/open-source-vs-saas"
+  status = 301
+[[redirects]]
+  from = "/blog/open-source-vs-saas"
+  to = "/blog/open-source-vs-saas.html"
+  status = 200
+
+[[redirects]]
+  from = "/blog/agencies.html"
+  to = "/blog/agencies"
+  status = 301
+[[redirects]]
+  from = "/blog/agencies"
+  to = "/blog/agencies.html"
   status = 200
 
 [[redirects]]
