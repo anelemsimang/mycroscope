@@ -139,15 +139,36 @@ export default function Billing() {
   const s = data.service;
   const plan = data.catalogue.find((p) => p.key === s.plan) ?? null;
   const pending = data.catalogue.find((p) => p.key === s.pending_plan) ?? null;
+  const prepaid = data.catalogue.find((p) => p.key === s.prepaid_plan) ?? null;
   const purchased = Math.max(0, s.seats);
   const unlimited = s.plan !== 'free' && s.seat_cap === null;
   const seatGroups = groupSeats(data.seats);
 
-  function reviewPurchase(target: PlanCatalogueEntry) {
+  function reviewPurchase(target: PlanCatalogueEntry, when?: 'now' | 'end') {
     const adding = target.key === s.plan;
     const count = Number(addSeats);
-    const seats = adding && Number.isInteger(count) && count > 0 ? count : Math.max(1, s.seats_used);
-    openWebsiteCheckout(target.key, seats);
+    const seats = adding && Number.isInteger(count) && count > 0 ? count : Math.max(purchased, s.seats_used, 1);
+    openWebsiteCheckout(target.key, seats, when);
+  }
+
+  async function scheduleUpgrade(target: PlanCatalogueEntry) {
+    setPayError(null);
+    setBusy(target.key);
+    try {
+      const quote = await api.quotePlan(target.key, undefined, 'schedule');
+      const ok = await confirmAction(
+        'Start when this term ends',
+        quote.message ?? 'Nothing is charged today. The new plan starts only if its year is paid.',
+        'Schedule the upgrade',
+      );
+      if (!ok) return;
+      await api.commitPlanChange(target.key, 'schedule');
+      await refresh();
+    } catch (e) {
+      setPayError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function addPrivilegedSeats() {
@@ -250,7 +271,7 @@ export default function Billing() {
               {s.plan !== 'free' && s.current_period_end
                 ? ` · ${s.status === 'past_due' ? 'was paid until' : 'paid until'} ${formatDate(s.current_period_end, profile.timezone)}`
                 : ''}
-              {pending ? ` · changes to ${pending.name}` : ''}
+              {prepaid ? ` · ${prepaid.name} is paid and starts then` : pending ? ` · changes to ${pending.name}` : ''}
             </Text>
           </View>
           {plan && plan.net_price_cents > 0 ? (
@@ -260,7 +281,7 @@ export default function Billing() {
             </View>
           ) : null}
         </View>
-        {pending && isOwner ? <Button title="Keep the current plan" variant="secondary" onPress={keepCurrent} loading={busy === 'keep'} /> : null}
+        {pending && isOwner && !s.prepaid_plan ? <Button title="Keep the current plan" variant="secondary" onPress={keepCurrent} loading={busy === 'keep'} /> : null}
       </Card>
 
       {payError ? <ErrorBanner message={payError} /> : null}
@@ -333,10 +354,30 @@ export default function Billing() {
                 </View>
               ))}
               <View style={{ flex: 1 }} />
-              {isOwner && !current && higher ? (
+              {isOwner && !current && higher && plan && plan.net_price_cents > 0 && s.status === 'active' && purchased > 0 ? (
+                s.prepaid_plan === item.key ? (
+                  <Text style={styles.hint}>Paid. It starts when this term ends.</Text>
+                ) : s.prepaid_plan ? (
+                  <Text style={styles.hint}>A paid upgrade is already waiting for the end of this term.</Text>
+                ) : (
+                  <View style={{ gap: 8 }}>
+                    <Button title="Start today" onPress={() => reviewPurchase(item, 'now')} />
+                    {scheduled ? (
+                      <Button title="Pay the new year" variant="secondary" onPress={() => reviewPurchase(item, 'end')} />
+                    ) : (
+                      <Button
+                        title="Start when this term ends"
+                        variant="secondary"
+                        onPress={() => scheduleUpgrade(item)}
+                        loading={busy === item.key}
+                      />
+                    )}
+                  </View>
+                )
+              ) : isOwner && !current && higher ? (
                 <Button title="Pay on the website" onPress={() => reviewPurchase(item)} />
               ) : null}
-              {isOwner && !current && lower ? (
+              {isOwner && !current && lower && !s.prepaid_plan ? (
                 <Button
                   title={item.key === 'free' ? 'Cancel at period end' : 'Downgrade at period end'}
                   variant="secondary"
@@ -354,7 +395,7 @@ export default function Billing() {
       <Text style={styles.hint}>
         You choose how many seats to buy. The card form is on Yoco's page. A seat is the monthly price times 12, with VAT, for one year from the day it is paid.
         A seat added later has its own year. Removing a seat waits until that seat's end date, and nothing is refunded.
-        An upgrade charges the price difference for the days left on each seat you already have. A downgrade starts when the last seat's year ends, and extra people are paused rather than removed.
+        Moving up from a paid plan can start today or at the end of this term. Starting today charges one year of the new plan for the seats already purchased, minus the unused part of the current plan on each seat, and every seat then ends one year from today. Waiting charges nothing today. The new plan starts only after a year of that plan is paid. If it is not paid, the change does not start. A downgrade starts when the last seat's year ends, and extra people are paused rather than removed.
       </Text>
       {!isOwner ? <Text style={styles.hint}>Only the manager who created the organisation can change the plan or pay.</Text> : null}
 

@@ -14,7 +14,7 @@ export function safeCheckoutPath(value: string | null | undefined): string | nul
   if (url.pathname !== '/checkout') return null;
   if (url.username || url.password || url.hash) return null;
   const keys = [...url.searchParams.keys()];
-  if (keys.some((key) => key !== 'plan' && key !== 'seats')) return null;
+  if (keys.some((key) => key !== 'plan' && key !== 'seats' && key !== 'when')) return null;
   const plan = url.searchParams.get('plan');
   if (plan && !PLANS.has(plan)) return null;
   const seatsRaw = url.searchParams.get('seats');
@@ -28,6 +28,11 @@ export function safeCheckoutPath(value: string | null | undefined): string | nul
   const params = new URLSearchParams();
   if (plan) params.set('plan', plan);
   if (seats) params.set('seats', seats);
+  const when = url.searchParams.get('when');
+  if (when !== null) {
+    if (when !== 'now' && when !== 'end') return null;
+    params.set('when', when);
+  }
   const query = params.toString();
   return query ? `/checkout?${query}` : '/checkout';
 }

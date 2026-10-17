@@ -20,13 +20,15 @@ export function openWebsite(path: string): void {
   void Linking.openURL(url);
 }
 
-export function openWebsiteCheckout(plan?: string, seats?: number): void {
+export function openWebsiteCheckout(plan?: string, seats?: number, when?: 'now' | 'end'): void {
   const count = seats && Number.isInteger(seats) && seats > 0 && seats <= 10000 ? seats : undefined;
-  const path = !plan
-    ? '/checkout'
-    : count
-      ? `/checkout?plan=${plan}&seats=${count}`
-      : `/checkout?plan=${plan}`;
+  const timing = when === 'end' ? 'end' : when === 'now' ? 'now' : undefined;
+  const params = new URLSearchParams();
+  if (plan) params.set('plan', plan);
+  if (count) params.set('seats', String(count));
+  if (timing) params.set('when', timing);
+  const query = params.toString();
+  const path = query ? `/checkout?${query}` : '/checkout';
   const safe = safeCheckoutPath(path);
   openWebsite(safe ?? '/pricing');
 }

@@ -109,8 +109,12 @@ webhook extends the year. The page the payer returns to is not proof of payment.
 A higher plan includes everything in the plans below it. Change a price or a feature in `plans` and
 `plan_feature_grants`. Do not hardcode them in the app.
 
-An upgrade starts as soon as Yoco confirms the payment. A mid-year upgrade charges the price difference for
-the days left. Moving from Free charges a full year. A downgrade or cancellation starts when the current year
+Moving from Free charges a full year. A paid upgrade has two choices. Starting today charges one year of the
+new plan for the seats already in force, minus each seat's unused current-plan value, and every seat then ends
+one year from today. Waiting charges nothing today. The higher plan starts at the end of the term only after a
+year of the new plan is paid (`p_when` `end` on `quote_plan_change`). If that payment is not made, the change
+does not start. Deploy `yoco-checkout` with this change so a payment for the end of the term is not charged as
+a start-today upgrade. A downgrade or cancellation starts when the current year
 ends, with no refund. If a payment is missed, the paid plan stays for 7 days (`billing_config.grace_days`), then
 the account moves to Free. Recording continues. Extra people are paused, not deleted. Activity outside the new
 plan is hidden, and it is deleted only once it is older than the longest plan or older than the shorter limit

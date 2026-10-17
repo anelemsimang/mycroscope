@@ -19,6 +19,9 @@ export function serviceMessage(s: ServiceStatus | null, timezone: string, now = 
   if (s.status === 'lapsed') {
     return { text: 'The paid plan ended. You are on the Free plan. Older activity is hidden, and extra people are paused. Upgrade plan for paid features.', tone: 'warning' };
   }
+  if (s.prepaid_plan) {
+    return { text: `The next plan is paid and starts on ${formatDate(s.current_period_end, timezone)}. You keep the current plan until then.`, tone: 'info' };
+  }
   if (s.pending_plan) {
     return { text: `A plan change is scheduled for ${formatDate(s.current_period_end, timezone)}. You keep the current plan until then.`, tone: 'info' };
   }

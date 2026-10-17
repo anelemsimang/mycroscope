@@ -161,6 +161,8 @@ export interface ServiceStatus {
   cancel_at_period_end?: boolean;
   pending_plan?: string | null;
   next_seat_end?: string | null;
+  /** Set when a higher plan is already paid and starts at the end of the current term. */
+  prepaid_plan?: string | null;
 }
 
 export interface PurchasedSeat {
@@ -359,13 +361,17 @@ export interface Payment {
 }
 
 export interface PlanQuote {
-  kind: 'new' | 'renewal' | 'upgrade' | 'downgrade' | 'current' | 'seats';
+  kind: 'new' | 'renewal' | 'upgrade' | 'upgrade_later' | 'downgrade' | 'current' | 'seats';
+  when?: 'now' | 'end' | 'schedule';
   gross_cents: number;
   net_cents?: number;
   vat_cents?: number;
+  credit_cents?: number;
+  later_gross_cents?: number;
   seats: number;
   min_seats?: number;
   plan: string;
+  ends_on?: string | null;
   intent_id?: string;
   message?: string;
 }
@@ -704,17 +710,19 @@ export const api = {
     return (data ?? []) as Payment[];
   },
 
-  /** Preview of a plan change. Nothing is charged and no downgrade is scheduled. */
-  quotePlan: (plan: string, seats?: number) => rpc<PlanQuote>('quote_plan_change', {
-    p_plan: plan, p_commit: false, p_seats: seats ?? null,
+  /** Preview of a plan change. Nothing is charged and no change is scheduled. */
+  quotePlan: (plan: string, seats?: number, when?: 'now' | 'end' | 'schedule') => rpc<PlanQuote>('quote_plan_change', {
+    p_plan: plan, p_commit: false, p_seats: seats ?? null, p_when: when ?? 'now',
   }),
   purchasedSeats: () => rpc<PurchasedSeat[]>('list_subscription_seats'),
   addGrantedSeats: (seats: number) => rpc<void>('add_granted_seats', { p_seats: seats }),
   scheduleSeatRemoval: (seat: string) => rpc<void>('schedule_seat_removal', { p_seat: seat }),
   keepSeat: (seat: string) => rpc<void>('keep_subscription_seat', { p_seat: seat }),
 
-  /** Schedules a downgrade or cancellation for the end of the paid year. */
-  commitPlanChange: (plan: string) => rpc<PlanQuote>('quote_plan_change', { p_plan: plan, p_commit: true }),
+  /** Schedules a downgrade, or an upgrade that starts when the current term ends. */
+  commitPlanChange: (plan: string, when?: 'now' | 'end' | 'schedule') => rpc<PlanQuote>('quote_plan_change', {
+    p_plan: plan, p_commit: true, p_when: when ?? 'now',
+  }),
 
   cancelPlanChange: () => rpc<void>('cancel_pending_plan_change'),
 

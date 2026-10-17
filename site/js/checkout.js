@@ -51,8 +51,13 @@ function seatsFromAddress() {
   return Number.isInteger(seats) && seats >= 1 && seats <= 10000 ? seats : 1;
 }
 
+function whenFromAddress() {
+  return new URLSearchParams(location.search).get("when") === "end" ? "end" : "now";
+}
+
 function signedOut(plan, seats) {
-  const returnPath = `/checkout?plan=${plan}&seats=${seats}`;
+  const timing = whenFromAddress() === "end" ? "&when=end" : "";
+  const returnPath = `/checkout?plan=${plan}&seats=${seats}${timing}`;
   const signIn = `/sign-in?next=${encodeURIComponent(returnPath)}`;
   const signUp = `/sign-up?next=${encodeURIComponent(returnPath)}`;
   show(`<p>Sign in as the organisation manager to pay. The card number is entered on Yoco's page, not on Mycroscope.</p>
@@ -103,14 +108,15 @@ async function start() {
     const mine = ++ticket;
     const [{ data: catalogue, error: catalogueError }, { data: quote, error: quoteError }] = await Promise.all([
       supabase.rpc("get_plan_catalogue"),
-      supabase.rpc("quote_plan_change", { p_plan: plan, p_commit: false, p_seats: seats }),
+      supabase.rpc("quote_plan_change", { p_plan: plan, p_commit: false, p_seats: seats, p_when: whenFromAddress() }),
     ]);
     if (mine !== ticket) return;
   if (catalogueError || quoteError || !quote) {
     const raw = textFrom(quoteError, "") || textFrom(catalogueError, "") || "The order could not be prepared.";
     const message = raw.replace(/\bOwners\b/g, "Managers").replace(/\bowners\b/g, "managers").replace(/\bOwner\b/g, "Manager").replace(/\bowner\b/g, "manager");
     const accountHolder = /\bowners?\b/i.test(raw);
-    const returnPath = `/checkout?plan=${plan}&seats=${seats}`;
+    const timing = whenFromAddress() === "end" ? "&when=end" : "";
+    const returnPath = `/checkout?plan=${plan}&seats=${seats}${timing}`;
     const signIn = `/sign-in?next=${encodeURIComponent(returnPath)}`;
     show(`<p class="banner error">${esc(message)}</p>
       ${accountHolder ? `<p><a href="/overview">Back to the dashboard</a></p>` : `<p><a id="sign-in-again" href="${esc(signIn)}">Sign in again</a></p>`}`);
@@ -123,13 +129,16 @@ async function start() {
   const chosen = Number(quote.seats) || seats;
   const chooseSeats = quote.kind === "new" || quote.kind === "renewal" || quote.kind === "seats";
   const payable = Number(quote.gross_cents) > 0 && quote.kind !== "downgrade";
-  const seatLabel = quote.kind === "seats" ? "New seats" : quote.kind === "upgrade" ? "Seats already purchased" : "Seats";
+  const seatLabel = quote.kind === "seats" ? "New seats" : quote.kind === "upgrade" || quote.kind === "upgrade_later" ? "Seats already purchased" : "Seats";
   const rows = [
     ["Plan", name],
     [seatLabel, String(chosen)],
   ];
   if (item) {
     rows.push(["Monthly price", Number(item.net_price_cents) === 0 ? "No charge" : `${rands(item.net_price_cents)} per seat, before VAT`]);
+  }
+  if (Number(quote.credit_cents) > 0) {
+    rows.push(["Unused current plan", rands(quote.credit_cents)]);
   }
   if (payable) {
     rows.push(["Before VAT", rands(quote.net_cents ?? 0)]);
@@ -141,9 +150,15 @@ async function start() {
          <input id="seats" type="number" min="${esc(quote.min_seats || 1)}" max="10000" value="${esc(chosen)}" inputmode="numeric">
        </div>`
     : "";
+  const later = quote.kind === "upgrade"
+    ? `<button class="button button-ghost" id="later" type="button">Start when this term ends</button>`
+    : "";
   const action = payable
     ? `<p class="due">${esc(rands(quote.gross_cents))}</p>
-       <button class="button" id="pay" type="button">Continue to secure payment</button>`
+       <div class="actions">
+         <button class="button" id="pay" type="button">${quote.kind === "upgrade" ? "Start today" : "Continue to secure payment"}</button>
+         ${later}
+       </div>`
     : quote.kind === "downgrade"
       ? `<p><a class="button" href="/billing">Schedule this in the dashboard</a></p>`
       : `<p><a class="button" href="/billing">Back to billing</a></p>`;
@@ -152,7 +167,12 @@ async function start() {
     ${quantity}
     <dl>${list}</dl>
     ${quote.message ? `<p>${esc(textFrom(quote.message))}</p>` : ""}
-    <p class="fine">You pay on Yoco's secure page. Mycroscope does not see the card number. Coming back to this site is not proof of payment. The plan changes when the payment is confirmed. Paying agrees to the <a href="/terms">terms of service</a>.</p>
+    <p class="fine">${quote.kind === "upgrade_later"
+      ? "You pay on Yoco's secure page. Mycroscope does not see the card number. The current plan stays until the date in the summary. The new plan starts then. If this payment is not made, the change does not start."
+      : quote.kind === "upgrade"
+        ? "Start today is paid on Yoco's secure page. Every seat then ends one year from today. Start when this term ends charges nothing now. The new year is due before that date, and the change does not start if it is not paid."
+        : "You pay on Yoco's secure page. Mycroscope does not see the card number. Coming back to this site is not proof of payment. The plan changes when the payment is confirmed."
+    } Paying agrees to the <a href="/terms">terms of service</a>.</p>
     ${action}`);
 
   document.querySelector("#seats")?.addEventListener("change", (event) => {
@@ -188,6 +208,7 @@ async function start() {
         body: JSON.stringify({
           plan,
           seats: chosen,
+          when: whenFromAddress(),
           return_url: `${origin}/checkout-received?plan=${q}`,
           cancel_url: `${origin}/checkout-cancelled?plan=${q}`,
           failure_url: `${origin}/checkout-failed?plan=${q}`,
@@ -206,6 +227,23 @@ async function start() {
     } catch {
       show(`<p class="banner error">The payment page could not be opened. Check your connection and try again.</p><p><a href="${esc(location.pathname + location.search)}">Try again</a></p>`);
     }
+  });
+
+  document.querySelector("#later")?.addEventListener("click", async () => {
+    const button = document.querySelector("#later");
+    if (!button) return;
+    button.disabled = true;
+    button.textContent = "Scheduling…";
+    const { data, error } = await supabase.rpc("quote_plan_change", {
+      p_plan: plan, p_commit: true, p_seats: chosen, p_when: "schedule",
+    });
+    if (error) {
+      show(`<p class="banner error">${esc(textFrom(error, "") || "The upgrade could not be scheduled.")}</p><p><a href="${esc(location.pathname + location.search)}">Try again</a></p>`);
+      return;
+    }
+    show(`<p>${esc(textFrom(data?.message, "") || "The upgrade is scheduled. Nothing is charged today.")}</p>
+      <p>Pay for the new year from billing before that date. If it is not paid, the change does not start.</p>
+      <p><a class="button" href="/billing">Back to billing</a></p>`);
   });
   }
 

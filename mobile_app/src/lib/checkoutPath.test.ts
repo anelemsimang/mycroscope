@@ -9,6 +9,8 @@ test('checkout return stays on the checkout page', () => {
   assert.equal(safeCheckoutPath('https://mycroscope.co.za/checkout?plan=productivity'), '/checkout?plan=productivity');
   assert.equal(safeCheckoutPath('https://mycroscope.netlify.app/checkout?plan=productivity'), '/checkout?plan=productivity');
   assert.equal(safeCheckoutPath('/checkout?plan=work_activity&seats=4'), '/checkout?plan=work_activity&seats=4');
+  assert.equal(safeCheckoutPath('/checkout?plan=workforce&seats=4&when=end'), '/checkout?plan=workforce&seats=4&when=end');
+  assert.equal(safeCheckoutPath('/checkout?plan=workforce&when=now'), '/checkout?plan=workforce&when=now');
 });
 
 test('checkout return rejects other destinations', () => {
@@ -19,4 +21,6 @@ test('checkout return rejects other destinations', () => {
   assert.equal(safeCheckoutPath('/checkout?plan=nope'), null);
   assert.equal(safeCheckoutPath('/checkout?plan=work_activity&seats=0'), null);
   assert.equal(safeCheckoutPath('/checkout?seats=2'), null);
+  assert.equal(safeCheckoutPath('/checkout?plan=workforce&when=schedule'), null);
+  assert.equal(safeCheckoutPath('/checkout?plan=workforce&when=later'), null);
 });

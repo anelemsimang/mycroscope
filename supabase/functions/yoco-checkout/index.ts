@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
   const { data: me, error: meError } = await user.auth.getUser();
   if (meError || !me.user?.email) return json({ error: 'Please sign in again.' }, 401);
 
-  let body: { plan?: unknown; seats?: unknown; return_url?: unknown; cancel_url?: unknown; failure_url?: unknown };
+  let body: { plan?: unknown; seats?: unknown; when?: unknown; return_url?: unknown; cancel_url?: unknown; failure_url?: unknown };
   try {
     body = await req.json();
   } catch {
@@ -53,7 +53,10 @@ Deno.serve(async (req) => {
   }
 
   const seats = typeof body.seats === 'number' && Number.isInteger(body.seats) ? body.seats : null;
-  const { data, error } = await user.rpc('quote_plan_change', { p_plan: body.plan, p_commit: true, p_seats: seats });
+  const when = body.when === 'end' ? 'end' : 'now';
+  const { data, error } = await user.rpc('quote_plan_change', {
+    p_plan: body.plan, p_commit: true, p_seats: seats, p_when: when,
+  });
   if (error) return json({ error: error.message }, 400);
   const quote = (data ?? {}) as Quote;
   if (!quote.gross_cents) {
