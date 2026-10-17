@@ -456,14 +456,26 @@ const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
 export interface ActivationResult { employee_id?: string; employee_code: string; activation_code: string; expires_at: string }
 
+function textOf(value: unknown, depth = 0): string {
+  if (typeof value === 'string') {
+    const text = value.trim();
+    return text && text !== '[object Object]' ? text : '';
+  }
+  if (depth > 2 || !value || typeof value !== 'object') return '';
+  const row = value as { message?: unknown; error?: unknown; msg?: unknown; error_description?: unknown; details?: unknown; hint?: unknown };
+  return textOf(row.message, depth + 1) || textOf(row.error_description, depth + 1) || textOf(row.msg, depth + 1)
+    || textOf(row.details, depth + 1) || textOf(row.hint, depth + 1) || textOf(row.error, depth + 1);
+}
+
 /** Turns PostgREST/GoTrue errors into a message suitable for an alert. */
 export function errorMessage(error: unknown): string {
   if (!error) return 'Something went wrong.';
-  const e = error as { message?: string; code?: string };
-  if (e.message?.includes('Failed to fetch') || e.message?.includes('Network request failed')) {
+  if (typeof error === 'string') return sayManager(error);
+  const e = error as { message?: unknown; code?: string };
+  const msg = textOf(e.message) || textOf(error);
+  if (msg.includes('Failed to fetch') || msg.includes('Network request failed')) {
     return "Can't reach the server. Check your internet connection.";
   }
-  const msg = e.message?.trim() ?? '';
   if (e.code === '42501' && (!msg || /^permission denied\b/i.test(msg) || msg === 'Not allowed')) {
     return "You don't have permission to do that.";
   }
@@ -485,11 +497,8 @@ async function functionError(error: unknown): Promise<string> {
   if (!response?.json) return fallback;
   try {
     const body = await response.json();
-    if (body && typeof body === 'object') {
-      const text = (body as { error?: unknown; message?: unknown }).error
-        ?? (body as { message?: unknown }).message;
-      if (typeof text === 'string' && text.trim() && !text.includes('non-2xx')) return sayManager(text);
-    }
+    const text = textOf(body);
+    if (text && !text.includes('non-2xx')) return sayManager(text);
   } catch {
     return fallback;
   }
@@ -718,7 +727,7 @@ export const api = {
       let message = 'Online payment is not available yet.';
       try {
         const body = ctx ? await ctx.json() : null;
-        if (body?.error) message = body.error;
+        if (body?.error) message = textOf(body.error) || message;
       } catch { /* keep the generic message */ }
       throw new Error(message);
     }
@@ -982,7 +991,7 @@ export const api = {
       let message = 'The test could not be sent. Try again later.';
       try {
         const body = ctx ? await ctx.json() : null;
-        if (body?.error) message = body.error;
+        if (body?.error) message = textOf(body.error) || message;
       } catch { /* keep the generic message */ }
       throw new Error(message);
     }

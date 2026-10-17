@@ -5,7 +5,7 @@ import { Text, View } from 'react-native';
 import {
   Button, Card, Empty, ErrorBanner, Field, InfoGrid, Loading, Pill, Screen, Segmented, colors, styles,
 } from '@/components/ui';
-import { api, operatorApi, type OperatorOrg, type PlanCatalogueEntry, type PurchasedSeat } from '@/lib/api';
+import { api, errorMessage, operatorApi, type OperatorOrg, type PlanCatalogueEntry, type PurchasedSeat } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatRelative } from '@/lib/format';
 import { planName, statusLine, statusName, supportOpen } from '@/lib/operator';
@@ -118,7 +118,7 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
       notify('Subscription updated', 'The change is recorded in the operator audit log and the customer\'s audit log.');
       onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -227,7 +227,7 @@ function DeleteCard({ org }: { org: OperatorOrg }) {
       notify('Customer deleted', `${org.name} and all its data have been erased.`);
       router.replace('/operator');
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(errorMessage(e));
     } finally {
       setBusy(false);
     }

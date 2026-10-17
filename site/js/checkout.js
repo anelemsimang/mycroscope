@@ -7,6 +7,22 @@ function esc(value) {
   }[ch]));
 }
 
+/** A failed request often returns { error: { message } }. Printing that object shows "[object Object]". */
+function textFrom(value, fallback = "") {
+  if (typeof value === "string" && value.trim() && value !== "[object Object]") return value.trim();
+  if (value && typeof value === "object") {
+    for (const key of ["message", "error", "msg", "error_description", "details", "hint"]) {
+      const inner = value[key];
+      if (typeof inner === "string" && inner.trim() && inner !== "[object Object]") return inner.trim();
+      if (inner && typeof inner === "object") {
+        const deeper = inner.message || inner.error || inner.msg;
+        if (typeof deeper === "string" && deeper.trim()) return deeper.trim();
+      }
+    }
+  }
+  return fallback;
+}
+
 function rands(cents) {
   const amount = Number(cents) / 100;
   const text = new Intl.NumberFormat("en-ZA", {
@@ -91,7 +107,7 @@ async function start() {
     ]);
     if (mine !== ticket) return;
   if (catalogueError || quoteError || !quote) {
-    const raw = quoteError?.message || catalogueError?.message || "The order could not be prepared.";
+    const raw = textFrom(quoteError, "") || textFrom(catalogueError, "") || "The order could not be prepared.";
     const message = raw.replace(/\bOwners\b/g, "Managers").replace(/\bowners\b/g, "managers").replace(/\bOwner\b/g, "Manager").replace(/\bowner\b/g, "manager");
     const accountHolder = /\bowners?\b/i.test(raw);
     const returnPath = `/checkout?plan=${plan}&seats=${seats}`;
@@ -135,7 +151,7 @@ async function start() {
   show(`<h2>${esc(name)}</h2>
     ${quantity}
     <dl>${list}</dl>
-    ${quote.message ? `<p>${esc(quote.message)}</p>` : ""}
+    ${quote.message ? `<p>${esc(textFrom(quote.message))}</p>` : ""}
     <p class="fine">You pay on Yoco's secure page. Mycroscope does not see the card number. Coming back to this site is not proof of payment. The plan changes when the payment is confirmed. Paying agrees to the <a href="/terms">terms of service</a>.</p>
     ${action}`);
 
@@ -179,11 +195,11 @@ async function start() {
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        show(`<p class="banner error">${esc(body.error || "The payment could not be started.")}</p><p><a href="${esc(location.pathname + location.search)}">Try again</a></p>`);
+        show(`<p class="banner error">${esc(textFrom(body.error, "") || textFrom(body, "") || "The payment could not be started.")}</p><p><a href="${esc(location.pathname + location.search)}">Try again</a></p>`);
         return;
       }
       if (!body.redirect_url) {
-        show(`<p>${esc(body.message || "No payment is due.")}</p><p><a class="button" href="/billing">Back to billing</a></p>`);
+        show(`<p>${esc(textFrom(body.message, "") || "No payment is due.")}</p><p><a class="button" href="/billing">Back to billing</a></p>`);
         return;
       }
       location.assign(body.redirect_url);
@@ -197,5 +213,5 @@ async function start() {
 }
 
 start().catch((error) => {
-  show(`<p class="banner error">${esc(error?.message || "The payment page could not be opened.")}</p>`);
+  show(`<p class="banner error">${esc(textFrom(error, "") || "The payment page could not be opened.")}</p>`);
 });
