@@ -18,7 +18,7 @@ export default function SupportAccess() {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  if (profile.role !== 'owner') return <Screen><Card><Text style={styles.hint}>Only the owner can manage support access.</Text></Card></Screen>;
+  if (profile.role !== 'owner') return <Screen><Card><Text style={styles.hint}>Only the manager who created the organisation can manage support access.</Text></Card></Screen>;
   if (loading && !data) return <Loading />;
 
   const now = Date.now();

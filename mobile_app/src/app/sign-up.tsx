@@ -40,7 +40,7 @@ export default function SignUp() {
       });
       if (authError) throw authError;
       if (!data.session) setSentTo(email.trim().toLowerCase());
-      // With a session, the auth listener signs the owner straight in.
+      // With a session, the auth listener signs the manager straight in.
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -73,7 +73,7 @@ export default function SignUp() {
       <Field label="Confirm password" value={confirm} onChangeText={setConfirm} secureTextEntry />
       <ToggleRow value={authorised} onChange={setAuthorised}
         label="I may act for this organisation"
-        hint="As owner you are responsible for telling employees about monitoring (POPIA). Mycroscope shows them a notice before tracking starts." />
+        hint="As the manager you are responsible for telling employees about monitoring (POPIA). Mycroscope shows them a notice before tracking starts." />
       <ToggleRow value={agreed} onChange={setAgreed}
         label="I agree to the terms of service and the privacy policy" />
       <Text style={styles.hint}>

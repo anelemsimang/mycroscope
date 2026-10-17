@@ -2,6 +2,8 @@
 // decides what each caller may see; nothing here is a security boundary.
 import { supabase } from './supabase';
 import type { Ymd } from './format';
+import { assembleDayBreakdown } from './dayBreakdown';
+import { NO_PROJECT, projectQuery } from './projects';
 
 export type Role = 'owner' | 'manager' | 'employee';
 export type ActivityState = 'active' | 'idle' | 'away' | 'paused' | 'logged_out' | 'off_hours' | 'inactive';
@@ -321,7 +323,7 @@ export interface CapacityRow {
   /** Negative when the team is above its goal. */
   gap_hours: number | null;
   fte_gap: number | null;
-  /** Null unless the caller is the owner or a manager not limited to teams. */
+  /** Null unless the caller is a manager not limited to teams. */
   annual_salary: number | null;
   annual_cost: number | null;
   monthly_cost: number | null;
@@ -465,7 +467,16 @@ export function errorMessage(error: unknown): string {
   if (e.code === '42501' && (!msg || /^permission denied\b/i.test(msg) || msg === 'Not allowed')) {
     return "You don't have permission to do that.";
   }
-  return msg || 'Something went wrong.';
+  return sayManager(msg) || 'Something went wrong.';
+}
+
+/** The account that creates the organisation is stored as owner. The product calls that person a manager. */
+function sayManager(text: string): string {
+  return text
+    .replace(/\bOwners\b/g, 'Managers')
+    .replace(/\bowners\b/g, 'managers')
+    .replace(/\bOwner\b/g, 'Manager')
+    .replace(/\bowner\b/g, 'manager');
 }
 
 async function functionError(error: unknown): Promise<string> {
@@ -477,7 +488,7 @@ async function functionError(error: unknown): Promise<string> {
     if (body && typeof body === 'object') {
       const text = (body as { error?: unknown; message?: unknown }).error
         ?? (body as { message?: unknown }).message;
-      if (typeof text === 'string' && text.trim() && !text.includes('non-2xx')) return text;
+      if (typeof text === 'string' && text.trim() && !text.includes('non-2xx')) return sayManager(text);
     }
   } catch {
     return fallback;
@@ -510,8 +521,6 @@ function numeric<T extends object>(rows: T[] | null, keys: (keyof T)[]): T[] {
   });
 }
 
-const projectArg = (project?: string | null) => (project ? { p_project: project } : {});
-
 export const api = {
   resolveLoginEmail: (identifier: string) => rpc<string | null>('resolve_login_email', { p_identifier: identifier }),
 
@@ -520,16 +529,16 @@ export const api = {
       ['active_seconds', 'idle_seconds', 'away_seconds', 'paused_seconds']),
 
   dailyTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
-    numeric(await rpc<DailyTotal[]>('get_daily_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
+    numeric(await rpc<DailyTotal[]>('get_daily_totals', { p_employee: employee, p_from: from, p_to: to, ...projectQuery(project) }),
       ['active_seconds', 'idle_seconds', 'away_seconds', 'paused_seconds', 'meeting_seconds', 'call_seconds',
         'break_seconds', 'other_seconds', 'productive_offline_seconds']),
 
   appTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
-    numeric(await rpc<AppTotal[]>('get_app_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
+    numeric(await rpc<AppTotal[]>('get_app_totals', { p_employee: employee, p_from: from, p_to: to, ...projectQuery(project) }),
       ['active_seconds', 'idle_seconds']),
 
   domainTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
-    numeric(await rpc<DomainTotal[]>('get_domain_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
+    numeric(await rpc<DomainTotal[]>('get_domain_totals', { p_employee: employee, p_from: from, p_to: to, ...projectQuery(project) }),
       ['active_seconds', 'idle_seconds']),
 
   projectTotals: async (employee: string, from: Ymd, to: Ymd) =>
@@ -537,7 +546,7 @@ export const api = {
       ['active_seconds', 'idle_seconds']),
 
   timeline: (employee: string, day: Ymd, project?: string | null) =>
-    rpc<TimelineRow[]>('get_timeline', { p_employee: employee, p_day: day, ...projectArg(project) }),
+    rpc<TimelineRow[]>('get_timeline', { p_employee: employee, p_day: day, ...projectQuery(project) }),
 
   projects: async () => {
     const { data, error } = await supabase.from('projects').select('id,name,is_active').order('name');
@@ -654,7 +663,8 @@ export const api = {
       .in('state', ['active', 'idle'])
       .lt('started_at', toIso)
       .gt('ended_at', fromIso);
-    if (filter.project) q = q.eq('project_id', filter.project);
+    if (filter.project === NO_PROJECT) q = q.is('project_id', null);
+    else if (filter.project) q = q.eq('project_id', filter.project);
     if (filter.domain !== undefined) q = q.eq('domain', filter.domain);
     if (filter.app !== undefined) q = filter.app === 'Unknown' ? q.is('app_name', null) : q.eq('app_name', filter.app);
     const { data, error } = await q.order('started_at', { ascending: false }).limit(SEGMENT_LIMIT);
@@ -811,8 +821,44 @@ export const api = {
   setCategory: (kind: 'app' | 'domain', pattern: string, category: Category, team: string | null = null) =>
     rpc<CategoryRule>('set_app_category', { p_kind: kind, p_pattern: pattern, p_category: category, p_team: team }),
   deleteCategory: (id: string) => rpc<void>('delete_app_category', { p_id: id }),
+  /**
+   * Apps and websites for one day, split by project.
+   * Built from the existing totals functions. Work with no project is what remains after every named project.
+   */
+  dayBreakdown: async (employee: string, day: Ymd) => {
+    const projects = await api.projectTotals(employee, day, day);
+    const unassigned = projects.find((project) => !project.project_id);
+    const named = projects.filter((project) => project.project_id);
+    const [allApps, allDomains, slices] = await Promise.all([
+      unassigned ? api.appTotals(employee, day, day) : Promise.resolve([]),
+      unassigned ? api.domainTotals(employee, day, day) : Promise.resolve([]),
+      Promise.all(named.map(async (project) => {
+        const [apps, domains] = await Promise.all([
+          api.appTotals(employee, day, day, project.project_id),
+          api.domainTotals(employee, day, day, project.project_id),
+        ]);
+        return {
+          project_id: project.project_id as string,
+          project_name: project.project_name,
+          apps: apps.map((app) => ({ label: app.app_name, active_seconds: app.active_seconds, idle_seconds: app.idle_seconds })),
+          domains: domains.map((site) => ({
+            label: site.domain, active_seconds: site.active_seconds, idle_seconds: site.idle_seconds, sample_title: site.sample_title,
+          })),
+        };
+      })),
+    ]);
+    return assembleDayBreakdown({
+      unassignedName: unassigned?.project_name ?? null,
+      allApps: allApps.map((app) => ({ label: app.app_name, active_seconds: app.active_seconds, idle_seconds: app.idle_seconds })),
+      allDomains: allDomains.map((site) => ({
+        label: site.domain, active_seconds: site.active_seconds, idle_seconds: site.idle_seconds, sample_title: site.sample_title,
+      })),
+      named: slices,
+    });
+  },
+
   categoryTotals: async (employee: string, from: Ymd, to: Ymd, project?: string | null) =>
-    numeric(await rpc<CategoryTotal[]>('get_category_totals', { p_employee: employee, p_from: from, p_to: to, ...projectArg(project) }),
+    numeric(await rpc<CategoryTotal[]>('get_category_totals', { p_employee: employee, p_from: from, p_to: to, ...projectQuery(project) }),
       ['active_seconds', 'idle_seconds']),
 
   // ---- POPIA requests ------------------------------------------------------
@@ -880,7 +926,7 @@ export const api = {
         ['active_seconds']),
       ['monthly_cost_per_seat'],
     ),
-  /** Owners and managers not limited to teams. The name is matched case-insensitively. */
+  /** Managers not limited to teams. The name is matched case-insensitively. */
   setLicence: (kind: 'app' | 'domain', name: string, seats: number, monthlyCostPerSeat: number | null) =>
     rpc<void>('set_software_licence', { p_kind: kind, p_name: name, p_seats: seats, p_monthly_cost_per_seat: monthlyCostPerSeat }),
   deleteLicence: (id: string) => rpc<void>('delete_software_licence', { p_id: id }),
@@ -902,7 +948,7 @@ export const api = {
   setWorkforceCost: (team: string | null, annualSalary: number | null) =>
     rpc<void>('set_workforce_cost', { p_team: team, p_annual_salary: annualSalary }),
 
-  // ---- alert rules (owners and managers not limited to teams change them) -----
+  // ---- alert rules (managers not limited to teams change them) -----
   alertRules: async () => {
     const { data, error } = await supabase.from('alert_rules')
       .select('id,name,kind,pattern,severity,action,work_hours_only,enabled,pack').order('name');

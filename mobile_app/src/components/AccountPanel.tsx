@@ -12,7 +12,7 @@ import { useProfile, useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 import { useAsync } from '@/lib/useAsync';
 
-const roleLabel = { owner: 'Owner', manager: 'Manager', employee: 'Employee' } as const;
+const roleLabel = { owner: 'Manager', manager: 'Manager', employee: 'Employee' } as const;
 
 export function AccountPanel() {
   const profile = useProfile();

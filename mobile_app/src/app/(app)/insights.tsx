@@ -640,7 +640,7 @@ function Capacity({ from, to, orgWide, teams }: {
         <Card title="Average salaries">
           <Text style={styles.hint}>
             Optional. With an average annual salary (cost to company) the capacity gap is also shown in rand. A team's
-            figure replaces the company figure for that team. Only owners and managers who see the whole company can see
+            figure replaces the company figure for that team. Only managers who see the whole company can see
             or change salaries.
           </Text>
           <SalaryRow team={null} label="Company average" value={data.costs.find((c) => c.team_id === null)?.annual_salary}

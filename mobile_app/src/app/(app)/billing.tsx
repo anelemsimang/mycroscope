@@ -330,7 +330,7 @@ export default function Billing() {
         A seat added later has its own year. Removing a seat waits until that seat's end date, and nothing is refunded.
         An upgrade charges the price difference for the days left on each seat you already have. A downgrade starts when the last seat's year ends, and extra people are paused rather than removed.
       </Text>
-      {!isOwner ? <Text style={styles.hint}>Only the organisation owner can change the plan or pay.</Text> : null}
+      {!isOwner ? <Text style={styles.hint}>Only the manager who created the organisation can change the plan or pay.</Text> : null}
 
       <Card title="Invoices">
         {data.invoices.length === 0 ? <Empty text="No invoices yet." /> : data.invoices.map((invoice) => (

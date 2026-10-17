@@ -17,7 +17,7 @@ export default function Teams() {
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  if (profile.role !== 'owner') return <Screen><Card><Text style={styles.hint}>Only the owner can manage teams.</Text></Card></Screen>;
+  if (profile.role !== 'owner') return <Screen><Card><Text style={styles.hint}>Only the manager who created the organisation can manage teams.</Text></Card></Screen>;
   if (loading && !data) return <Loading />;
   if (data && !data.teamsAllowed) return <Screen />;
 
@@ -39,7 +39,7 @@ export default function Teams() {
       <Card title="Teams">
         <Text style={styles.hint}>
           A manager assigned to one or more teams sees only the people in those teams. Managers without a team see
-          everyone. The owner always sees everyone. People can belong to one team.
+          everyone. The manager who created the organisation always sees everyone. People can belong to one team.
         </Text>
         {formError ? <ErrorBanner message={formError} /> : null}
         <Field label="New team" value={name} onChangeText={setName} placeholder="e.g. Dispatch" />

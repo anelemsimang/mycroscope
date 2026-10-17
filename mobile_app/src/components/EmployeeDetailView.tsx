@@ -1,22 +1,28 @@
 import { router } from 'expo-router';
 import { useEffect, useState, type ReactNode } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryTotalsCard } from '@/components/CategoryTotals';
+import { ChooseDay } from '@/components/DayPicker';
+import { ProjectDayGroups } from '@/components/ProjectDayGroups';
 import { Timeline } from '@/components/Timeline';
 import {
   BarRow, Button, Card, Empty, ErrorBanner, InfoGrid, InnerTabs, LinkRow, Loading, Screen, SectionTitle, Segmented,
   StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
 import { DESTINATIONS, formatBytes } from '@/lib/alerts';
+import { buildActivityReport } from '@/lib/activityReport';
 import { api, errorMessage, type EmployeeRow, type FileEvent, type OfflineEntry, type WorkLocationDay } from '@/lib/api';
 import { notify } from '@/lib/dialog';
-import { shareCsv } from '@/lib/export';
+import { shareCsv, sharePdf } from '@/lib/export';
 import {
   PERIOD_LABELS, addDays, dayStartUtc, formatDateTime, formatDay, formatDuration, formatRelative, formatTime,
   offlineSeconds, offlineSummary, periodRange, toCsv, todayIn,
   type PeriodKey,
 } from '@/lib/format';
+import { groupDayBreakdown, type DayGroup } from '@/lib/dayBreakdown';
+import { ALL_PROJECTS, NO_PROJECT, isProjectFilter, projectChoices, projectChoicesForDay, projectScopeName, projectScopePhrase } from '@/lib/projects';
+import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
 type Tab = 'overview' | 'activity' | 'apps' | 'history';
@@ -28,8 +34,7 @@ const TABS: { value: Tab; label: string }[] = [
 ];
 const PERIODS = (Object.keys(PERIOD_LABELS) as PeriodKey[]).map((value) => ({ value, label: PERIOD_LABELS[value] }));
 const HISTORY_DAYS = 30;
-const ALL_PROJECTS = 'all';
-const roleLabel = { owner: 'Owner', manager: 'Manager', employee: 'Employee' } as const;
+const roleLabel = { owner: 'Manager', manager: 'Manager', employee: 'Employee' } as const;
 
 interface Props {
   employee: EmployeeRow;
@@ -41,10 +46,12 @@ interface Props {
 }
 
 export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intro }: Props) {
+  const profile = useProfile();
   const id = employee.id;
   const today = todayIn(timezone);
   const [tab, setTab] = useState<Tab>('overview');
   const [period, setPeriod] = useState<PeriodKey>('today');
+  const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [project, setProject] = useState<string>(ALL_PROJECTS);
 
   useEffect(() => {
@@ -53,9 +60,14 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
 
   const featureState = useAsync(() => api.features(), []);
   const granted = featureState.data ?? [];
+  const featuresReady = featureState.data != null;
+  const showSoftware = featuresReady && granted.includes('software_usage');
+  const showCoaching = featuresReady && profile.role !== 'employee' && granted.includes('coaching');
   const showLive = isSelf || granted.includes('real_time_visibility');
   const showPlaces = granted.includes('work_location_insights');
   const showFiles = granted.includes('file_activity');
+  const tabs = TABS.filter((item) => item.value !== 'apps' || showSoftware);
+  const visibleTab = tab === 'apps' && !showSoftware ? 'overview' : tab;
 
   const status = useAsync(() => (showLive ? api.agentStatus(id) : Promise.resolve(null)), [id, showLive]);
   useEffect(() => {
@@ -107,15 +119,20 @@ export function EmployeeDetailView({ employee, timezone, isSelf, canManage, intr
           </Card>
         ) : null}
 
-        <InnerTabs tabs={TABS} value={tab} onChange={setTab} />
+        <InnerTabs tabs={tabs} value={visibleTab} onChange={setTab} />
 
-        {tab === 'overview' ? <Overview id={id} timezone={timezone} today={today} status={status} showLive={showLive} /> : null}
-        {tab === 'activity' ? <ActivityTab id={id} timezone={timezone} today={today} status={status} showLive={showLive} /> : null}
-        {tab === 'apps' ? (
-          <AppsWeb id={id} name={employee.name} timezone={timezone} today={today} period={period} setPeriod={setPeriod}
-            project={project} setProject={setProject} canEditCategories={canManage} />
+        {visibleTab === 'overview' ? <Overview id={id} timezone={timezone} today={today} status={status} showLive={showLive} /> : null}
+        {visibleTab === 'activity' ? (
+          <ActivityTab id={id} timezone={timezone} today={today} status={status} showLive={showLive} showSoftware={showSoftware} />
         ) : null}
-        {tab === 'history' ? (
+        {visibleTab === 'apps' ? (
+          <AppsWeb id={id} name={employee.name} timezone={timezone} today={today} period={period}
+            setPeriod={(next) => { setPickedDay(null); setPeriod(next); }}
+            pickedDay={pickedDay} setPickedDay={setPickedDay}
+            project={project} setProject={setProject} canEditCategories={canManage}
+            includeSoftware={showSoftware} includeCoaching={showCoaching} />
+        ) : null}
+        {visibleTab === 'history' ? (
           <History id={id} name={employee.name} timezone={timezone} today={today} isSelf={isSelf}
             showPlaces={showPlaces} showFiles={showFiles} />
         ) : null}
@@ -225,8 +242,8 @@ function Overview({ id, timezone, today, status, showLive }: {
   );
 }
 
-function ActivityTab({ id, timezone, today, status, showLive }: {
-  id: string; timezone: string; today: string; status: StatusState; showLive: boolean;
+function ActivityTab({ id, timezone, today, status, showLive, showSoftware }: {
+  id: string; timezone: string; today: string; status: StatusState; showLive: boolean; showSoftware: boolean;
 }) {
   const { data, error, loading, refresh } = useAsync(() => api.timeline(id, today), [id, today]);
   return (
@@ -234,56 +251,141 @@ function ActivityTab({ id, timezone, today, status, showLive }: {
       {showLive ? <LiveStatus status={status} /> : null}
       {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
       {loading && !data ? <Loading /> : null}
-      {data ? <Timeline rows={data} timezone={timezone} title="Today's timeline" /> : null}
+      {data ? <Timeline rows={data} timezone={timezone} title="Today's timeline" apps={showSoftware} /> : null}
       <Button small variant="secondary" title="Open today's details"
         onPress={() => router.push({ pathname: '/day', params: { id, day: today } })} />
     </>
   );
 }
 
-function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setProject, canEditCategories }: {
+function AppsWeb({ id, name, timezone, today, period, setPeriod, pickedDay, setPickedDay, project, setProject, canEditCategories, includeSoftware, includeCoaching }: {
   id: string; name: string; timezone: string; today: string; period: PeriodKey; setPeriod: (p: PeriodKey) => void;
+  pickedDay: string | null; setPickedDay: (day: string | null) => void;
   project: string; setProject: (p: string) => void; canEditCategories: boolean;
+  includeSoftware: boolean; includeCoaching: boolean;
 }) {
-  const range = periodRange(period, today);
-  const projectId = project === ALL_PROJECTS ? null : project;
+  const profile = useProfile();
+  const [exporting, setExporting] = useState(false);
+  const range = pickedDay ? { from: pickedDay, to: pickedDay } : periodRange(period, today);
+  const projectFilter = isProjectFilter(project) ? project : null;
+  const singleDay = range.from === range.to;
+  const grouped = singleDay && !projectFilter;
   const projectList = useAsync(() => api.projects(), []);
+  const dayProjects = useAsync(
+    () => (pickedDay ? api.projectTotals(id, pickedDay, pickedDay) : Promise.resolve(null)),
+    [id, pickedDay],
+  );
   const { data, error, loading, refresh } = useAsync(async () => {
-    const [apps, domains, projects, categories] = await Promise.all([
-      api.appTotals(id, range.from, range.to, projectId),
-      api.domainTotals(id, range.from, range.to, projectId),
+    const categories = await api.categoryTotals(id, range.from, range.to, projectFilter).catch(() => []);
+    if (grouped) {
+      const rows = await api.dayBreakdown(id, range.from);
+      return { grouped: true as const, groups: groupDayBreakdown(rows), categories };
+    }
+    const [apps, domains, projects] = await Promise.all([
+      api.appTotals(id, range.from, range.to, projectFilter),
+      api.domainTotals(id, range.from, range.to, projectFilter),
       api.projectTotals(id, range.from, range.to),
-      api.categoryTotals(id, range.from, range.to, projectId).catch(() => []),
     ]);
-    return { apps, domains, projects, categories };
-  }, [id, range.from, range.to, projectId]);
-  const projectMax = Math.max(0, ...(data?.projects ?? []).map((p) => p.active_seconds));
-  const projectName = projectList.data?.find((p) => p.id === projectId)?.name;
+    return { grouped: false as const, apps, domains, projects, categories };
+  }, [id, range.from, range.to, projectFilter, grouped]);
+  const summaryProjects = data && !data.grouped ? data.projects : [];
+  const projectMax = Math.max(0, ...summaryProjects.map((p) => p.active_seconds));
+  const scope = projectScopePhrase(project, projectList.data);
+  const periodLabel = pickedDay ? formatDay(pickedDay, { weekday: true }) : PERIOD_LABELS[period];
   const params = {
     id, from: range.from, to: range.to, name,
-    label: projectName ? `${PERIOD_LABELS[period]} · ${projectName}` : PERIOD_LABELS[period],
-    ...(projectId ? { project: projectId } : {}),
+    label: scope ? `${periodLabel} · ${scope}` : periodLabel,
+    ...(projectFilter ? { project: projectFilter } : {}),
   };
-  const projectOptions = [
-    { value: ALL_PROJECTS, label: 'All projects' },
-    ...(projectList.data ?? []).map((p) => ({ value: p.id, label: p.is_active ? p.name : `${p.name} (archived)` })),
-  ];
+  const openGroup = (group: DayGroup) => ({
+    ...params,
+    project: group.projectId ?? NO_PROJECT,
+    label: `${periodLabel} · ${group.projectId ? `project ${group.name}` : 'no project'}`,
+  });
+  const namedProjects = projectList.data ?? [];
+  const projectOptions = namedProjects.length === 0
+    ? []
+    : pickedDay
+      ? (dayProjects.data ? projectChoicesForDay(namedProjects, dayProjects.data) : [{ value: ALL_PROJECTS, label: 'All projects' }])
+      : projectChoices(namedProjects);
+  useEffect(() => {
+    if (!pickedDay || !dayProjects.data) return;
+    if (!projectOptions.some((option) => option.value === project)) setProject(ALL_PROJECTS);
+  }, [pickedDay, dayProjects.data, project, projectOptions, setProject]);
+
+  async function downloadPdf() {
+    setExporting(true);
+    try {
+      const [days, apps, domains, categories, projects] = await Promise.all([
+        api.dailyTotals(id, range.from, range.to, projectFilter),
+        api.appTotals(id, range.from, range.to, projectFilter),
+        api.domainTotals(id, range.from, range.to, projectFilter),
+        api.categoryTotals(id, range.from, range.to, projectFilter).catch(() => []),
+        projectFilter ? Promise.resolve([]) : api.projectTotals(id, range.from, range.to),
+      ]);
+      const report = buildActivityReport({
+        organization: profile.organizationName,
+        timezone,
+        scopeName: name,
+        periodLabel,
+        from: range.from,
+        to: range.to,
+        projectLabel: projectScopeName(project, projectList.data),
+        generatedBy: profile.name,
+        people: [{
+          name,
+          days: days.map((day) => ({
+            day: day.day, active: day.active_seconds, idle: day.idle_seconds, paused: day.paused_seconds,
+            away: day.away_seconds, offline: offlineSeconds(day), productiveOffline: day.productive_offline_seconds,
+          })),
+        }],
+        apps: apps.map((app) => ({ name: app.app_name, active: app.active_seconds, idle: app.idle_seconds })),
+        websites: domains.map((site) => ({ name: site.domain, active: site.active_seconds })),
+        categories: categories.map((row) => ({ category: row.category, active: row.active_seconds })),
+        projects: projects.map((row) => ({ name: row.project_name, active: row.active_seconds })),
+        access: { software: includeSoftware, coaching: includeCoaching },
+      });
+      if (id !== profile.employeeId) {
+        await api.logAccess(id, 'exported_report', {
+          from: range.from, to: range.to, format: 'pdf', ...(projectFilter ? { project: scope || projectFilter } : {}),
+        });
+      }
+      const fileScope = scope ? `_${scope.replace(/\s+/g, '_')}` : '';
+      await sharePdf(`mycroscope_${name}${fileScope}_${range.from}_${range.to}`, report);
+    } catch (e) {
+      notify('Export failed', errorMessage(e));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <>
-      {projectOptions.length > 1 ? (
+      {(pickedDay ? projectOptions.length > 1 : projectOptions.length > 0) ? (
         <Segmented options={projectOptions} value={project} onChange={setProject} />
       ) : null}
-      <Segmented options={PERIODS} value={period} onChange={setPeriod} />
+      <Segmented options={PERIODS} value={pickedDay ? null : period} onChange={setPeriod} />
+      <ChooseDay day={pickedDay} today={today} onChange={setPickedDay} />
       <Text style={styles.hint}>
-        {range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`}
-        {projectName ? ` · project ${projectName}` : ''}
+        {range.from === range.to ? formatDay(range.from, { weekday: true }) : `${formatDay(range.from)} – ${formatDay(range.to)}`}
+        {scope ? ` · ${scope}` : ''}
+      </Text>
+      <Button title="Download PDF" onPress={downloadPdf} loading={exporting} />
+      <Text style={styles.hint}>
+        The PDF uses the filters selected above: the period or chosen day, and All projects, No project, or one project.
+        {includeCoaching ? ' It includes the charts, the breakdown, and what to improve.' : ' It includes the charts and the breakdown.'}
       </Text>
       {error ? <ErrorBanner message={error} onRetry={refresh} /> : null}
       {loading && !data ? <Loading /> : null}
       {data ? (
         <>
           <CategoryTotalsCard totals={data.categories} canEdit={canEditCategories} />
+          {data.grouped ? (
+            <ProjectDayGroups groups={data.groups}
+              onApp={(group, app) => router.push({ pathname: '/app-usage', params: { ...openGroup(group), app } })}
+              onWebsite={(group, domain) => router.push({ pathname: '/website', params: { ...openGroup(group), domain } })} />
+          ) : (
+            <>
           <Card title={`Application Summary (${data.apps.length})`}>
             {data.apps.length === 0 ? <Empty text="No applications recorded for this period." /> : null}
             {data.apps.map((a) => (
@@ -300,12 +402,24 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod, project, setPro
                 onPress={() => router.push({ pathname: '/website', params: { ...params, domain: d.domain } })} />
             ))}
           </Card>
-          {!projectId && data.projects.length > 0 ? (
+            </>
+          )}
+          {!data.grouped && !projectFilter && data.projects.length > 0 ? (
             <Card title="Projects">
-              {data.projects.map((p) => (
-                <BarRow key={p.project_id ?? 'none'} label={p.project_name} value={p.active_seconds} max={projectMax}
-                  right={formatDuration(p.active_seconds)} color="#7c3aed" />
-              ))}
+              {data.projects.map((p) => {
+                const row = (
+                  <BarRow label={p.project_name} value={p.active_seconds} max={projectMax}
+                    right={formatDuration(p.active_seconds)} color="#7c3aed"
+                    sub={p.project_id ? undefined : 'Work recorded with no project selected'} />
+                );
+                if (namedProjects.length === 0) return <View key={p.project_id ?? NO_PROJECT}>{row}</View>;
+                return (
+                  <Pressable key={p.project_id ?? NO_PROJECT} onPress={() => setProject(p.project_id ?? NO_PROJECT)}>
+                    {row}
+                  </Pressable>
+                );
+              })}
+              {namedProjects.length > 0 ? <Text style={styles.hint}>Tap a project to see only that work.</Text> : null}
             </Card>
           ) : null}
           <Text style={[styles.hint, { textAlign: 'center' }]}>Times shown are active time. Tap a row for details.</Text>

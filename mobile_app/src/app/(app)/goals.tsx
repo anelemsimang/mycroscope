@@ -73,7 +73,7 @@ export default function Goals() {
           marked productive, plus time away from the computer in the reasons counted as productive under Monitoring &
           privacy. People below the under-utilised share of the goal may have spare capacity; people above the
           over-utilised share may be overloaded. A team's goal replaces the company goal for that team. Goals are only
-          visible to owners and managers.
+          visible to managers.
         </Text>
       </Card>
       {actionError ? <ErrorBanner message={actionError} /> : null}

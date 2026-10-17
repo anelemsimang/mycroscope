@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { addDays, csvEscape, dayStartUtc, formatDuration, offlineSeconds, offlineSummary, periodRange, todayIn, weekdayIndex } from './format.ts';
+import { addDays, addMonths, csvEscape, dayStartUtc, formatDuration, monthCells, offlineSeconds, offlineSummary, periodRange, todayIn, weekdayIndex } from './format.ts';
 
 test('local midnight as a UTC instant, including DST changes', () => {
   assert.equal(dayStartUtc('2026-10-06', 'Africa/Johannesburg'), '2026-10-05T22:00:00.000Z');
@@ -21,6 +21,16 @@ test('day arithmetic across month and year ends', () => {
   assert.equal(addDays('2026-03-01', -1), '2026-02-28');
   assert.equal(weekdayIndex('2026-10-05'), 0); // Monday
   assert.equal(weekdayIndex('2026-10-11'), 6); // Sunday
+});
+
+test('a month grid starts on Monday and covers every day', () => {
+  assert.equal(addMonths('2026-01-31', 1), '2026-02-01');
+  assert.equal(addMonths('2026-03-01', -1), '2026-02-01');
+  const cells = monthCells('2026-10-17');
+  assert.equal(cells[0], null);
+  assert.equal(cells[3], '2026-10-01'); // 1 Oct 2026 is a Thursday
+  assert.equal(cells.filter((d) => d?.startsWith('2026-10-')).length, 31);
+  assert.equal(cells.at(-1), '2026-10-31');
 });
 
 test('period ranges', () => {

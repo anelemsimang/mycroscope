@@ -33,9 +33,18 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]) {
   }, deps);
 
   const loadedOnce = useRef(false);
+  const seenLoader = useRef<typeof run | null>(null);
   useFocusEffect(useCallback(() => {
-    run(loadedOnce.current ? 'silent' : 'initial');
+    const first = !loadedOnce.current;
+    const filtersChanged = seenLoader.current !== null && seenLoader.current !== run;
+    seenLoader.current = run;
     loadedOnce.current = true;
+    if (first || filtersChanged) {
+      setData(null);
+      run('initial');
+    } else {
+      run('silent');
+    }
   }, [run]));
 
   return { data, error, loading, refreshing, refresh: () => run('refresh'), reload: () => run('silent') };

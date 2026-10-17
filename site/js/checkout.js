@@ -39,7 +39,7 @@ function signedOut(plan, seats) {
   const returnPath = `/checkout?plan=${plan}&seats=${seats}`;
   const signIn = `/sign-in?next=${encodeURIComponent(returnPath)}`;
   const signUp = `/sign-up?next=${encodeURIComponent(returnPath)}`;
-  show(`<p>Sign in as the organisation owner to pay. The card number is entered on Yoco's page, not on Mycroscope.</p>
+  show(`<p>Sign in as the organisation manager to pay. The card number is entered on Yoco's page, not on Mycroscope.</p>
     <p><a class="button" id="sign-in-pay" href="${esc(signIn)}">Sign in to pay</a></p>
     <p><a id="create-account" href="${esc(signUp)}">Create an account</a></p>`);
   for (const id of ["sign-in-pay", "create-account"]) {
@@ -91,12 +91,13 @@ async function start() {
     ]);
     if (mine !== ticket) return;
   if (catalogueError || quoteError || !quote) {
-    const message = quoteError?.message || catalogueError?.message || "The order could not be prepared.";
-    const owner = /owner/i.test(message);
+    const raw = quoteError?.message || catalogueError?.message || "The order could not be prepared.";
+    const message = raw.replace(/\bOwners\b/g, "Managers").replace(/\bowners\b/g, "managers").replace(/\bOwner\b/g, "Manager").replace(/\bowner\b/g, "manager");
+    const accountHolder = /\bowners?\b/i.test(raw);
     const returnPath = `/checkout?plan=${plan}&seats=${seats}`;
     const signIn = `/sign-in?next=${encodeURIComponent(returnPath)}`;
     show(`<p class="banner error">${esc(message)}</p>
-      ${owner ? `<p><a href="/overview">Back to the dashboard</a></p>` : `<p><a id="sign-in-again" href="${esc(signIn)}">Sign in again</a></p>`}`);
+      ${accountHolder ? `<p><a href="/overview">Back to the dashboard</a></p>` : `<p><a id="sign-in-again" href="${esc(signIn)}">Sign in again</a></p>`}`);
     document.getElementById("sign-in-again")?.addEventListener("click", () => rememberReturn(returnPath));
     return;
   }

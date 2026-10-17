@@ -255,7 +255,7 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
           hint="Stays off until you switch it on." />
         <ToggleRow label="Email the weekly note to managers" value={draft.advisor_weekly_email}
           onChange={(v) => set('advisor_weekly_email', v)}
-          hint="Owners and managers who can see that team. Uses the same email setup as the weekly digest." />
+          hint="Managers who can see that team. Uses the same email setup as the weekly digest." />
       </Card>
       ) : null}
 
@@ -330,8 +330,8 @@ function MonitoringForm({ initial, current, fileActivityAllowed, workLocationAll
       <Card title="Account security">
         <ToggleRow label="Require two-factor login for managers" value={draft.require_mfa} disabled={!isOwner}
           onChange={(v) => set('require_mfa', v)}
-          hint={isOwner ? 'Owners and managers must enter a code from an authenticator app to see employee data. Recommended.'
-            : 'Only the owner can change this.'} />
+          hint={isOwner ? 'Managers must enter a code from an authenticator app to see employee data. Recommended.'
+            : 'Only the manager who created the organisation can change this.'} />
       </Card>
 
       <Card title="Retention">

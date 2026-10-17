@@ -14,7 +14,7 @@ import { useProfile, useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 import { useAsync } from '@/lib/useAsync';
 
-const roleLabel = { owner: 'OWNER', manager: 'MANAGER', employee: 'EMPLOYEE' } as const;
+const roleLabel = { owner: 'MANAGER', manager: 'MANAGER', employee: 'EMPLOYEE' } as const;
 const roleColor = { owner: colors.danger, manager: colors.warning, employee: colors.primary } as const;
 
 export default function Dashboard() {
@@ -70,7 +70,7 @@ export default function Dashboard() {
     <Screen refreshing={refreshing} onRefresh={refresh} padded={false}>
       <View style={local.header}>
         <Text style={local.welcome}>Welcome, {profile.name}</Text>
-        <Text style={styles.hint}>{profile.role === 'owner' ? 'Owner' : 'Manager'} Dashboard · {profile.organizationName}</Text>
+        <Text style={styles.hint}>Manager Dashboard · {profile.organizationName}</Text>
         {liveAllowed ? (
           <View style={[styles.row, { gap: 6, marginTop: 4 }]}>
             <View style={[local.dot, { backgroundColor: live ? colors.success : colors.danger }]} />

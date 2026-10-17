@@ -66,7 +66,7 @@ async function fetchProfile(userId: string): Promise<Loaded> {
     if (isOperator) return { kind: 'operator' };
     return { kind: 'rejected', message: 'This account is not linked to an organisation.' };
   }
-  if (!emp.is_active) return { kind: 'rejected', message: 'Your account has been deactivated. Contact your organisation owner.' };
+  if (!emp.is_active) return { kind: 'rejected', message: 'Your account has been deactivated. Contact your organisation manager.' };
   const { data: org, error: orgError } = await supabase
     .from('organizations')
     .select('name,timezone')

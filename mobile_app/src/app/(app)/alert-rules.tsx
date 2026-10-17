@@ -89,7 +89,7 @@ export default function AlertRules() {
           a website needs           the desktop app version 2.6.3. Alerts appear under Alerts and in Slack/Teams if connected.
         </Text>
         {!data.canEdit ? (
-          <Text style={styles.hint}>Only the owner and managers who are not limited to teams can change rules.</Text>
+          <Text style={styles.hint}>Only managers who are not limited to teams can change rules.</Text>
         ) : null}
       </Card>
       {actionError ? <ErrorBanner message={actionError} /> : null}

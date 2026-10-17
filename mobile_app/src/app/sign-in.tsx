@@ -52,7 +52,7 @@ export default function SignIn() {
         <Button title="Sign in" onPress={submit} loading={busy} />
         <Link href="/forgot-password" style={{ color: colors.primary, textAlign: 'right' }}>Forgot password?</Link>
         <View style={[styles.divider, { marginVertical: 16 }]} />
-        <Text style={styles.hint}>New to Mycroscope? Create an organisation and become its owner.</Text>
+        <Text style={styles.hint}>New to Mycroscope? Create an organisation and become its manager.</Text>
         <Button title="Create an organisation" variant="secondary" onPress={() => {
           const next = Platform.OS === 'web' ? new URLSearchParams(window.location.search).get('next') : null;
           if (next) router.push({ pathname: '/sign-up', params: { next } });

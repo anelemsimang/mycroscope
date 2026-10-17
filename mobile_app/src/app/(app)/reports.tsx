@@ -1,18 +1,21 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 
+import { ChooseDay } from '@/components/DayPicker';
 import {
   Button, Card, ColumnChart, Empty, ErrorBanner, Loading, Screen, Segmented, StackedBar, StatGrid, colors, stateColor, styles,
 } from '@/components/ui';
+import { buildActivityReport } from '@/lib/activityReport';
 import { api, errorMessage, type DailyTotal, type EmployeeRow } from '@/lib/api';
 import { notify } from '@/lib/dialog';
 import { activityChart } from '@/lib/charts';
 import { sharePdf, shareCsv } from '@/lib/export';
 import {
-  PERIOD_LABELS, formatDay, formatDuration, formatTime, offlineSeconds, percent, periodRange, toCsv, todayIn,
+  PERIOD_LABELS, formatDay, formatDuration, formatTime, offlineSeconds, periodRange, toCsv, todayIn,
   type PeriodKey,
 } from '@/lib/format';
+import { ALL_PROJECTS, isProjectFilter, projectChoices, projectChoicesForDay, projectScopeName, projectScopePhrase } from '@/lib/projects';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
@@ -45,25 +48,44 @@ const PERIODS = (Object.keys(PERIOD_LABELS) as PeriodKey[]).map((value) => ({ va
 export default function Reports() {
   const profile = useProfile();
   const [period, setPeriod] = useState<PeriodKey>('this_week');
+  const [pickedDay, setPickedDay] = useState<string | null>(null);
   const [who, setWho] = useState<string>(ALL);
   const [team, setTeam] = useState<string>(ALL);
-  const [project, setProject] = useState<string>(ALL);
+  const [project, setProject] = useState<string>(ALL_PROJECTS);
   const [exporting, setExporting] = useState<'csv' | 'pdf' | 'timesheet' | null>(null);
-  const range = periodRange(period, todayIn(profile.timezone));
-  const projectId = project === ALL ? null : project;
+  const today = todayIn(profile.timezone);
+  const range = pickedDay ? { from: pickedDay, to: pickedDay } : periodRange(period, today);
+  const projectFilter = isProjectFilter(project) ? project : null;
 
   const employees = useAsync(async () => (await api.employees()).filter((e) => e.auth_user_id), []);
   const projects = useAsync(() => api.projects(), []);
-  const teams = useAsync(async () => (await api.teams()).teams, []);
-  const projectName = projects.data?.find((p) => p.id === projectId)?.name;
+  const features = useAsync(() => api.features(), []);
+  const teamsAllowed = features.data?.includes('teams') ?? false;
+  const teams = useAsync(async () => (teamsAllowed ? (await api.teams()).teams : []), [teamsAllowed]);
+  const projectLabel = projectScopeName(project, projects.data);
+  const projectPhrase = projectScopePhrase(project, projects.data);
   const teamName = teams.data?.find((t) => t.id === team)?.name;
-  const people = (employees.data ?? []).filter((e) => team === ALL || e.team_id === team);
+  const people = (employees.data ?? []).filter((e) => !teamsAllowed || team === ALL || e.team_id === team);
   const selected = who === ALL ? people.filter((e) => e.is_active) : people.filter((e) => e.id === who);
   const selectedKey = selected.map((e) => e.id).join(',');
+  const workedProjects = useAsync(async () => {
+    if (!pickedDay) return null;
+    const lists = await Promise.all(selected.map((employee) => api.projectTotals(employee.id, pickedDay, pickedDay)));
+    return lists.flat();
+  }, [pickedDay, selectedKey]);
+  const projectOptions = (projects.data?.length ?? 0) === 0
+    ? []
+    : pickedDay
+      ? (workedProjects.data ? projectChoicesForDay(projects.data ?? [], workedProjects.data) : [])
+      : projectChoices(projects.data ?? []);
+  useEffect(() => {
+    if (!pickedDay || !workedProjects.data) return;
+    if (projectOptions.length > 0 && !projectOptions.some((option) => option.value === project)) setProject(ALL_PROJECTS);
+  }, [pickedDay, workedProjects.data, project, projectOptions]);
 
   const { data, error, loading, refreshing, refresh } = useAsync(async () => {
     const lines = await Promise.all(selected.map(async (employee): Promise<Line> => {
-      const days = await api.dailyTotals(employee.id, range.from, range.to, projectId);
+      const days = await api.dailyTotals(employee.id, range.from, range.to, projectFilter);
       const sum = (k: keyof DailyTotal) => days.reduce((a, d) => a + Number(d[k] ?? 0), 0);
       return {
         employee, days,
@@ -74,7 +96,7 @@ export default function Reports() {
       };
     }));
     return lines.sort((a, b) => b.active - a.active);
-  }, [range.from, range.to, selectedKey, projectId]);
+  }, [range.from, range.to, selectedKey, projectFilter]);
 
   const totals = useMemo(() => (data ?? []).reduce(
     (t, l) => ({
@@ -84,16 +106,17 @@ export default function Reports() {
     { active: 0, idle: 0, paused: 0, offline: 0, productiveOffline: 0 }), [data]);
   const single = who !== ALL ? data?.[0] : undefined;
   const scopeName = single ? single.employee.name : teamName ?? 'Team';
-  const title = `${scopeName} activity · ${PERIOD_LABELS[period]}${projectName ? ` · ${projectName}` : ''}`;
+  const periodLabel = pickedDay ? formatDay(pickedDay, { weekday: true }) : PERIOD_LABELS[period];
+  const title = `${scopeName} activity · ${periodLabel}${projectPhrase ? ` · ${projectPhrase}` : ''}`;
   const subtitle = (range.from === range.to ? formatDay(range.from) : `${formatDay(range.from)} – ${formatDay(range.to)}`)
-    + (projectName ? ` · project ${projectName}` : '');
+    + (projectPhrase ? ` · ${projectPhrase}` : '');
 
   async function logExport(format: string) {
     await Promise.all((data ?? []).map((l) =>
       api.logAccess(l.employee.id, 'exported_report', {
         from: range.from, to: range.to, format, scope: who === ALL ? 'team' : 'employee',
         ...(teamName ? { team: teamName } : {}),
-        ...(projectId ? { project: projectName ?? projectId } : {}),
+        ...(projectLabel ? { project: projectLabel } : {}),
       })));
   }
 
@@ -102,12 +125,12 @@ export default function Reports() {
     setExporting('csv');
     try {
       const rows = data.flatMap((l) => l.days.map((d) => [
-        d.day, l.employee.name, l.employee.employee_code, projectName ?? 'All projects', d.active_seconds, d.idle_seconds, d.paused_seconds,
+        d.day, l.employee.name, l.employee.employee_code, projectLabel ?? 'All projects', d.active_seconds, d.idle_seconds, d.paused_seconds,
         d.away_seconds, d.meeting_seconds, d.call_seconds, d.break_seconds, d.other_seconds, d.productive_offline_seconds,
         (d.active_seconds / 3600).toFixed(2),
       ]));
       await logExport('csv');
-      await shareCsv(`mycroscope_${scopeName}${projectName ? `_${projectName}` : ''}_${range.from}_${range.to}`, toCsv(
+      await shareCsv(`mycroscope_${scopeName}${projectLabel ? `_${projectLabel}` : ''}_${range.from}_${range.to}`, toCsv(
         ['date', 'employee', 'employee_code', 'project', 'active_seconds', 'idle_seconds', 'paused_seconds', 'away_seconds',
           'meeting_seconds', 'call_seconds', 'break_seconds', 'other_seconds', 'productive_offline_seconds', 'active_hours'],
         rows));
@@ -133,7 +156,7 @@ export default function Reports() {
         ];
       }));
       await logExport('timesheet_csv');
-      await shareCsv(`mycroscope_timesheet_${scopeName}_${range.from}_${range.to}`, toCsv(
+      await shareCsv(`mycroscope_timesheet_${scopeName}${projectLabel ? `_${projectLabel}` : ''}_${range.from}_${range.to}`, toCsv(
         ['date', 'employee', 'employee_code', `first_activity (${profile.timezone})`, 'last_activity', 'span_hours',
           'active_hours', 'idle_hours', 'paused_hours'], rows));
     } catch (e) {
@@ -147,38 +170,58 @@ export default function Reports() {
     if (!data) return;
     setExporting('pdf');
     try {
-      const table = single
-        ? {
-          headers: ['Day', 'Active', 'Idle', 'Paused', 'Away', 'Time away'],
-          rows: single.days.map((d) => [
-            formatDay(d.day, { weekday: true }),
-            formatDuration(d.active_seconds), formatDuration(d.idle_seconds), formatDuration(d.paused_seconds),
-            formatDuration(d.away_seconds), formatDuration(offlineSeconds(d)),
-          ]),
-          numericFrom: 1,
+      const granted = features.data ?? await api.features();
+      const software = granted.includes('software_usage');
+      const coaching = granted.includes('coaching');
+      const packs = await Promise.all(data.map(async (line) => {
+        const [apps, domains, categories, projects] = await Promise.all([
+          software ? api.appTotals(line.employee.id, range.from, range.to, projectFilter) : Promise.resolve([]),
+          software ? api.domainTotals(line.employee.id, range.from, range.to, projectFilter) : Promise.resolve([]),
+          software
+            ? api.categoryTotals(line.employee.id, range.from, range.to, projectFilter).catch(() => [])
+            : Promise.resolve([]),
+          projectFilter ? Promise.resolve([]) : api.projectTotals(line.employee.id, range.from, range.to),
+        ]);
+        return { apps, domains, categories, projects };
+      }));
+      const apps = new Map<string, { active: number; idle: number }>();
+      const websites = new Map<string, number>();
+      const categories = new Map<string, number>();
+      const projects = new Map<string, number>();
+      for (const pack of packs) {
+        for (const app of pack.apps) {
+          const prev = apps.get(app.app_name) ?? { active: 0, idle: 0 };
+          apps.set(app.app_name, { active: prev.active + app.active_seconds, idle: prev.idle + app.idle_seconds });
         }
-        : {
-          headers: ['Employee', 'Active', 'Idle', 'Paused', 'Days active', 'Active share'],
-          rows: data.map((l) => [
-            l.employee.name, formatDuration(l.active), formatDuration(l.idle), formatDuration(l.paused),
-            String(l.daysWorked), percent(l.active, l.active + l.idle),
-          ]),
-          numericFrom: 1,
-        };
-      const chart = activityChart(activityPoints(data, single), !single);
-      await logExport('pdf');
-      await sharePdf(`mycroscope_activity_${range.from}_${range.to}`, {
-        kicker: profile.organizationName,
-        title: 'Activity report',
-        subtitle: `${title} · ${subtitle} · times in ${profile.timezone}`,
-        intro: `Total: ${formatDuration(totals.active)} active, ${formatDuration(totals.idle)} idle, ${formatDuration(totals.paused)} paused, and ${formatDuration(totals.offline)} time away, of which ${formatDuration(totals.productiveOffline)} was counted as productive.`,
-        charts: chart ? [chart] : [],
-        table,
-        notes: [
-          'Time away is what people said an idle or away stretch was. It is left out when a project is selected. Reasons marked productive are added to productive time.',
-        ],
-        notice: `Generated ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC by ${profile.name}. Active means keyboard or mouse input within the idle threshold. Contains personal information. Handle it under POPIA.`,
+        for (const site of pack.domains) websites.set(site.domain, (websites.get(site.domain) ?? 0) + site.active_seconds);
+        for (const row of pack.categories) categories.set(row.category, (categories.get(row.category) ?? 0) + row.active_seconds);
+        for (const row of pack.projects) projects.set(row.project_name, (projects.get(row.project_name) ?? 0) + row.active_seconds);
+      }
+      const report = buildActivityReport({
+        organization: profile.organizationName,
+        timezone: profile.timezone,
+        scopeName,
+        periodLabel,
+        from: range.from,
+        to: range.to,
+        projectLabel,
+        generatedBy: profile.name,
+        people: data.map((line) => ({
+          name: line.employee.name,
+          days: line.days.map((day) => ({
+            day: day.day, active: day.active_seconds, idle: day.idle_seconds, paused: day.paused_seconds,
+            away: day.away_seconds, offline: offlineSeconds(day), productiveOffline: day.productive_offline_seconds,
+          })),
+        })),
+        apps: [...apps].map(([name, time]) => ({ name, ...time })),
+        websites: [...websites].map(([name, active]) => ({ name, active })),
+        categories: [...categories].map(([category, active]) => ({ category, active })),
+        projects: [...projects].map(([name, active]) => ({ name, active })),
+        access: { software, coaching },
       });
+      await logExport('pdf');
+      const fileScope = projectLabel ? `_${projectLabel}` : '';
+      await sharePdf(`mycroscope_activity_${scopeName}${fileScope}_${range.from}_${range.to}`, report);
     } catch (e) {
       notify('Export failed', errorMessage(e));
     } finally {
@@ -192,7 +235,7 @@ export default function Reports() {
 
   return (
     <Screen refreshing={refreshing} onRefresh={refresh}>
-      {(teams.data?.length ?? 0) > 0 ? (
+      {teamsAllowed && (teams.data?.length ?? 0) > 0 ? (
         <Card title="Select Team">
           <Segmented value={team} onChange={(v) => { setTeam(v); setWho(ALL); }} options={[
             { value: ALL, label: 'All teams' },
@@ -207,16 +250,18 @@ export default function Reports() {
           ...people.map((e) => ({ value: e.id, label: e.is_active ? e.name : `${e.name} (deactivated)` })),
         ]} />
       </Card>
-      {(projects.data?.length ?? 0) > 0 ? (
+      {(pickedDay ? projectOptions.length > 1 : (projects.data?.length ?? 0) > 0) ? (
         <Card title="Select Project">
-          <Segmented value={project} onChange={setProject} options={[
-            { value: ALL, label: 'All projects' },
-            ...(projects.data ?? []).map((p) => ({ value: p.id, label: p.is_active ? p.name : `${p.name} (archived)` })),
-          ]} />
+          <Segmented value={project} onChange={setProject} options={projectOptions} />
+          <Text style={styles.hint}>
+            No project is computer time recorded without a project selected. Time away stays on All projects.
+          </Text>
         </Card>
       ) : null}
       <Card title="Select Period">
-        <Segmented options={PERIODS} value={period} onChange={setPeriod} />
+        <Segmented options={PERIODS} value={pickedDay ? null : period}
+          onChange={(value) => { setPickedDay(null); setPeriod(value); }} />
+        <ChooseDay day={pickedDay} today={today} onChange={setPickedDay} />
         <Text style={styles.hint}>{subtitle} · {profile.timezone}</Text>
       </Card>
 
@@ -238,15 +283,18 @@ export default function Reports() {
           ) : null}
           <Text style={styles.hint}>
             Time away is what people said an idle or away stretch was, so it also sits inside idle or away.
-            {projectId
-              ? ' A project report leaves it out, because it is not tied to a project.'
+            {projectFilter
+              ? ' A named project or No project leaves it out, because it is not tied to a project.'
               : ` ${formatDuration(totals.productiveOffline)} of it is counted as productive.`}
           </Text>
           {single ? (
             <Card title={`${single.employee.name} · by day`}>
               {single.days.map((d) => (
                 <Pressable key={d.day} style={{ paddingVertical: 5, gap: 4 }}
-                  onPress={() => router.push({ pathname: '/day', params: { id: single.employee.id, day: d.day } })}>
+                  onPress={() => router.push({
+                    pathname: '/day',
+                    params: { id: single.employee.id, day: d.day, ...(projectFilter ? { project: projectFilter } : {}) },
+                  })}>
                   <View style={[styles.row, { justifyContent: 'space-between' }]}>
                     <Text style={styles.rowText}>{formatDay(d.day, { weekday: true })}</Text>
                     <Text style={styles.rowText}>{formatDuration(d.active_seconds)}</Text>

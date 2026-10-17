@@ -136,7 +136,7 @@ export default function ManageEmployee() {
           <Button title="Delete employee and data" variant="danger" onPress={confirmDelete} loading={busy === 'delete'} />
         </Card>
       ) : null}
-      {isOwnerAccount ? <Text style={[styles.hint, { color: colors.muted }]}>The owner account cannot be deleted.</Text> : null}
+      {isOwnerAccount ? <Text style={[styles.hint, { color: colors.muted }]}>The manager who created the organisation cannot be deleted.</Text> : null}
     </Screen>
   );
 }

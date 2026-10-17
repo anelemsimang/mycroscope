@@ -57,7 +57,7 @@ export default function OperatorOrgScreen() {
         </View>
         <Text style={styles.hint}>{statusLine(org)}</Text>
         <InfoGrid items={[
-          { label: 'Owner', value: `${org.owner_name ?? '–'}${org.owner_email ? ` · ${org.owner_email}` : ''}` },
+          { label: 'Manager', value: `${org.owner_name ?? '–'}${org.owner_email ? ` · ${org.owner_email}` : ''}` },
           { label: 'Signed up', value: formatDate(org.created_at) },
           { label: 'People', value: org.plan === 'free'
             ? `${org.active_employees} of ${cap ?? 3}`
@@ -178,7 +178,7 @@ function SupportCard({ org, snapshot, open }: {
           {org.support_access_until
             ? `The customer's support permission expired ${formatRelative(org.support_access_until)}.`
             : 'The customer has not granted support access.'}{' '}
-          The owner can grant time-limited access from Account → Support access. Activity data is never visible here.
+          The manager can grant time-limited access from Account → Support access. Activity data is never visible here.
         </Text>
       </Card>
     );

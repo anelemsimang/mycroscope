@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { Platform, Text, View } from 'react-native';
 
-import { headerOptions } from '@/components/ui';
+import { Loading, colors, headerOptions } from '@/components/ui';
 import { clearStoredCheckout, readStoredCheckout, safeCheckoutPath } from '@/lib/checkoutPath';
 import { SessionProvider, useSession } from '@/lib/session';
 import { isConfigured } from '@/lib/supabase';
@@ -64,7 +64,13 @@ function RootNavigator() {
       router.replace((isManager ? '/overview' : '/me') as Href);
     }
   }, [isLoading, signedIn, operator, isManager, pathname]);
-  if (isLoading) return null;
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <Loading label="Opening Mycroscope" />
+      </View>
+    );
+  }
 
   return (
     <>

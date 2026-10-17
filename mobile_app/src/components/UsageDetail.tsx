@@ -58,10 +58,12 @@ export function UsageDetail({ kind }: { kind: 'app' | 'website' }) {
   const fromIso = dayStartUtc(from, tz);
   const toIso = dayStartUtc(addDays(to, 1), tz);
 
+  const features = useAsync(() => api.features(), []);
+  const allowed = features.data?.includes('software_usage') ?? false;
   const { data, error, loading, refreshing, refresh } = useAsync(
-    () => api.segments(p.id, fromIso, toIso,
-      { ...(kind === 'app' ? { app: subject } : { domain: subject }), project: p.project || null }),
-    [p.id, fromIso, toIso, subject, kind, p.project]);
+    () => (allowed ? api.segments(p.id, fromIso, toIso,
+      { ...(kind === 'app' ? { app: subject } : { domain: subject }), project: p.project || null }) : Promise.resolve(null)),
+    [p.id, fromIso, toIso, subject, kind, p.project, allowed]);
 
   const summary = useMemo(() => data ? summarise(data, Date.parse(fromIso), Date.parse(toIso), (r) => kind === 'app'
     ? [r.window_title ?? '', r.window_title ?? 'Window title not recorded', null]
@@ -70,6 +72,15 @@ export function UsageDetail({ kind }: { kind: 'app' | 'website' }) {
 
   const periodText = `${p.label ? `${p.label} · ` : ''}${from === to ? formatDay(from) : `${formatDay(from)} – ${formatDay(to)}`}`;
   const multiDay = from !== to;
+
+  if (!features.data) {
+    return (
+      <Screen>
+        {features.error ? <ErrorBanner message={features.error} onRetry={features.refresh} /> : <Loading />}
+      </Screen>
+    );
+  }
+  if (!allowed) return <Screen />;
 
   return (
     <Screen refreshing={refreshing} onRefresh={refresh}>

@@ -8,7 +8,7 @@ import { useAsync } from '@/lib/useAsync';
 
 interface Step { done: boolean; title: string; detail: string; href: Href }
 
-/** Getting-started checklist for owners; hidden once everything is done. */
+/** Getting-started checklist for the manager who created the organisation; hidden once everything is done. */
 export function OnboardingChecklist({ team }: { team: TeamRow[] | null }) {
   const profile = useProfile();
   const { aal, service } = useSession();

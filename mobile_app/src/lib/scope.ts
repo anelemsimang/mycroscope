@@ -3,7 +3,7 @@ import type { Profile } from './session';
 
 /**
  * Teams the signed-in manager may change, mirroring can_manage_team in the database.
- * orgWide: the owner, or a manager not limited to particular teams.
+ * orgWide: a manager not limited to particular teams. The account that created the organisation is included.
  */
 export function manageableTeams(teams: Team[], managers: TeamManager[], profile: Profile) {
   const mine = managers.filter((m) => m.employee_id === profile.employeeId).map((m) => m.team_id);

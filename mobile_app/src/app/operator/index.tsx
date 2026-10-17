@@ -151,7 +151,7 @@ export default function OperatorHome() {
       ) : null}
 
       <Card title={`Directory (${orgs.length})`}>
-        <Field label="Search" value={query} onChangeText={setQuery} placeholder="Customer or owner" autoCapitalize="none" />
+        <Field label="Search" value={query} onChangeText={setQuery} placeholder="Customer or manager" autoCapitalize="none" />
         <View style={local.filters}>
           <FilterChip label="All" count={counts.all} on={filter === 'all'} onPress={() => setFilter('all')} />
           <FilterChip label="Needs a look" count={counts.attention} on={filter === 'attention'} onPress={() => setFilter('attention')} />
@@ -176,7 +176,7 @@ export default function OperatorHome() {
             style={({ pressed }) => [wide ? local.row : local.stack, pressed && { backgroundColor: '#f8fafc' }]}>
             <View style={[local.col, wide ? local.cName : { flex: 1 }]}>
               <Text style={local.orgName} numberOfLines={1}>{o.name}</Text>
-              <Text style={styles.hint} numberOfLines={1}>{o.owner_name ?? 'No owner'}{o.owner_email ? ` · ${o.owner_email}` : ''}</Text>
+              <Text style={styles.hint} numberOfLines={1}>{o.owner_name ?? 'No manager'}{o.owner_email ? ` · ${o.owner_email}` : ''}</Text>
             </View>
             {wide ? (
               <>

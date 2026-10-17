@@ -39,6 +39,35 @@ export function daysBetween(from: Ymd, to: Ymd): number {
   return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
 }
 
+/** The first day of the month containing `day`. */
+export function monthStart(day: Ymd): Ymd {
+  return `${day.slice(0, 7)}-01`;
+}
+
+/** Move by whole months and land on the first of that month. */
+export function addMonths(day: Ymd, n: number): Ymd {
+  const [y, m] = monthStart(day).split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
+}
+
+/** Monday-first month grid. Nulls are the blank cells before the 1st. */
+export function monthCells(firstOfMonth: Ymd): (Ymd | null)[] {
+  const first = monthStart(firstOfMonth);
+  const blanks = weekdayIndex(first);
+  const [y, m] = first.split('-').map(Number);
+  const count = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const cells: (Ymd | null)[] = Array(blanks).fill(null);
+  for (let day = 1; day <= count; day++) cells.push(`${first.slice(0, 7)}-${String(day).padStart(2, '0')}`);
+  return cells;
+}
+
+export function formatMonth(day: Ymd): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(
+    new Date(`${monthStart(day)}T12:00:00Z`),
+  );
+}
+
 export type PeriodKey = 'today' | 'yesterday' | 'this_week' | 'last_week' | 'this_month' | 'last_month';
 
 export const PERIOD_LABELS: Record<PeriodKey, string> = {

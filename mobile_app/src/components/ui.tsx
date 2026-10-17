@@ -55,7 +55,7 @@ export function Screen({ children, refreshing, onRefresh, padded = true, maxWidt
     <ScrollView
       style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={[
-        { width: '100%', maxWidth, alignSelf: 'center' },
+        { width: '100%', maxWidth, alignSelf: 'center', flexGrow: 1 },
         padded ? { padding: 12, paddingBottom: 40, gap: 12 } : null,
       ]}
       keyboardShouldPersistTaps="handled"
@@ -136,7 +136,7 @@ export function ToggleRow({ label, value, onChange, disabled, hint }: {
 }
 
 export function Segmented<T extends string>({ options, value, onChange }: {
-  options: { value: T; label: string }[]; value: T; onChange: (v: T) => void;
+  options: { value: T; label: string }[]; value: T | null; onChange: (v: T) => void;
 }) {
   return (
     <View style={styles.segmented}>
@@ -241,8 +241,14 @@ export function StackedBar({ parts, height = 10 }: { parts: { value: number; col
   );
 }
 
-export function Loading() {
-  return <View style={{ padding: 40 }}><ActivityIndicator size="large" color={colors.primary} /></View>;
+/** Centered spinner for a screen or section that has not finished loading. */
+export function Loading({ label = 'Loading' }: { label?: string }) {
+  return (
+    <View style={styles.loading} accessibilityRole="progressbar" accessibilityLabel={label}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={styles.loadingText}>{label}</Text>
+    </View>
+  );
 }
 
 export function ErrorBanner({ message, onRetry }: { message: string; onRetry?: () => void }) {
@@ -389,6 +395,11 @@ export const styles = StyleSheet.create({
   statValue: { fontSize: 18, fontWeight: '700', color: colors.text },
   barTrack: { height: 8, borderRadius: 4, backgroundColor: colors.border, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 4 },
+  loading: {
+    flex: 1, flexGrow: 1, minHeight: 240, alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24,
+    backgroundColor: colors.background,
+  },
+  loadingText: { fontSize: 13, fontWeight: '500', color: colors.muted },
   error: { flexDirection: 'row', gap: 8, padding: 12, borderRadius: 10, backgroundColor: '#fee2e2' },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   divider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },

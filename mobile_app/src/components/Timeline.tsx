@@ -13,6 +13,7 @@ interface Block {
   seconds: number;
   label: string;
   detail: string | null;
+  project: string | null;
 }
 
 /** Merges consecutive segments with the same state and app/site into readable blocks. */
@@ -21,21 +22,30 @@ function toBlocks(rows: TimelineRow[]): Block[] {
   for (const r of rows) {
     const label = r.state === 'active' ? (r.app_name ?? 'Unknown app') : stateLabel[r.state];
     const detail = r.state === 'active' ? (r.domain ?? r.window_title) : null;
+    const project = r.state === 'active' ? r.project_name : null;
     const last = blocks[blocks.length - 1];
     if (last && last.state === r.state && last.label === label && last.end === r.started_at &&
-        (r.state !== 'active' || last.detail === detail)) {
+        (r.state !== 'active' || last.detail === detail) && last.project === project) {
       last.end = r.ended_at;
       last.seconds += r.duration_seconds;
     } else {
-      blocks.push({ key: r.id, state: r.state, start: r.started_at, end: r.ended_at, seconds: r.duration_seconds, label, detail });
+      blocks.push({
+        key: r.id, state: r.state, start: r.started_at, end: r.ended_at, seconds: r.duration_seconds, label, detail, project,
+      });
     }
   }
   return blocks;
 }
 
-export function Timeline({ rows, timezone, title = 'Timeline' }: { rows: TimelineRow[]; timezone: string; title?: string }) {
+export function Timeline({ rows, timezone, title = 'Timeline', apps = true }: {
+  rows: TimelineRow[]; timezone: string; title?: string;
+  /** Application and website names. Work Activity Tracking and above. */
+  apps?: boolean;
+}) {
   const [showAll, setShowAll] = useState(false);
-  const blocks = useMemo(() => toBlocks(rows), [rows]);
+  const blocks = useMemo(() => toBlocks(rows).map((block) => (
+    apps || block.state !== 'active' ? block : { ...block, label: stateLabel.active, detail: null }
+  )), [rows, apps]);
   const shown = showAll ? blocks : blocks.slice(-25);
   return (
     <Card title={`${title} (${blocks.length})`} right={blocks.length > 25 ? (
@@ -51,6 +61,7 @@ export function Timeline({ rows, timezone, title = 'Timeline' }: { rows: Timelin
           <View style={{ flex: 1 }}>
             <Text style={styles.rowText} numberOfLines={1}>{b.label}</Text>
             {b.detail ? <Text style={styles.hint} numberOfLines={1}>{b.detail}</Text> : null}
+            {b.project ? <Text style={styles.hint} numberOfLines={1}>{b.project}</Text> : null}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={styles.hint}>{formatTime(b.start, timezone)}–{formatTime(b.end, timezone)}</Text>

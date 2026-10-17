@@ -91,7 +91,7 @@ export default function WorkHours() {
       {data.allowed ? (
         <>
           <Card title="Teams">
-            {data.scope.teams.length === 0 ? <Empty text="No teams yet. The owner creates teams under Settings → Teams." /> : null}
+            {data.scope.teams.length === 0 ? <Empty text="No teams yet. The manager who created the organisation creates teams under Settings → Teams." /> : null}
             {data.scope.teams.map((t) => {
               const own = byTeam.get(t.id);
               const key = `team:${t.id}`;

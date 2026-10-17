@@ -49,7 +49,7 @@ export default function Integrations() {
     return (
       <Screen>
         <Card title="Slack, Teams & API">
-          <Text style={styles.hint}>Only the owner and managers who are not limited to teams can manage integrations.</Text>
+          <Text style={styles.hint}>Only managers who are not limited to teams can manage integrations.</Text>
         </Card>
       </Screen>
     );
