@@ -1,6 +1,8 @@
-import type { PDFFont, PDFPage } from 'pdf-lib';
+import type { PDFFont, PDFImage, PDFPage } from 'pdf-lib';
 // The package entry pulls in tslib in a way Expo Web cannot load. This build already includes it.
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib/dist/pdf-lib.esm.js';
+
+import { WORDMARK_PNG_BASE64 } from './wordmark.ts';
 
 /** A written report or a table report, drawn as a document rather than a picture of the screen. */
 export interface PdfReport {
@@ -43,6 +45,29 @@ function clean(font: PDFFont, value: string): string {
   return out;
 }
 
+function decodeBase64(value: string): Uint8Array {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const clean = value.replace(/\s/g, '');
+  const pad = clean.endsWith('==') ? 2 : clean.endsWith('=') ? 1 : 0;
+  const out = new Uint8Array((clean.length * 3) / 4 - pad);
+  let written = 0;
+  for (let i = 0; i < clean.length; i += 4) {
+    const a = alphabet.indexOf(clean[i]);
+    const b = alphabet.indexOf(clean[i + 1]);
+    const c = alphabet.indexOf(clean[i + 2]);
+    const d = alphabet.indexOf(clean[i + 3]);
+    const bits = (a << 18) | (b << 12) | ((c < 0 ? 0 : c) << 6) | (d < 0 ? 0 : d);
+    out[written++] = (bits >> 16) & 255;
+    if (clean[i + 2] !== '=') out[written++] = (bits >> 8) & 255;
+    if (clean[i + 3] !== '=') out[written++] = bits & 255;
+  }
+  return out;
+}
+
+function drawWordmark(page: PDFPage, logo: PDFImage, x: number, y: number, height: number) {
+  page.drawImage(logo, { x, y, width: height * (logo.width / logo.height), height });
+}
+
 function trimNumber(value: number): string {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
@@ -77,6 +102,7 @@ export async function buildPdf(report: PdfReport): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const logo = await doc.embedPng(decodeBase64(WORDMARK_PNG_BASE64));
   const pages: PDFPage[] = [];
   let page = doc.addPage([PAGE_W, PAGE_H]);
   pages.push(page);
@@ -107,6 +133,9 @@ export async function buildPdf(report: PdfReport): Promise<Uint8Array> {
     }
     gap(after);
   }
+
+  drawWordmark(page, logo, MARGIN, y - 22, 22);
+  y -= 34;
 
   if (report.kicker) paragraph(report.kicker, 10, bold, NAVY, 2);
   paragraph(report.title, 20, bold, NAVY, 4);
@@ -143,7 +172,7 @@ export async function buildPdf(report: PdfReport): Promise<Uint8Array> {
 
   pages.forEach((item, index) => {
     const label = `Page ${index + 1} of ${pages.length}`;
-    item.drawText('Mycroscope', { x: MARGIN, y: 32, size: 9, font: bold, color: NAVY });
+    drawWordmark(item, logo, MARGIN, 24, 14);
     const labelWidth = font.widthOfTextAtSize(label, 9);
     item.drawText(label, { x: PAGE_W - MARGIN - labelWidth, y: 32, size: 9, font, color: MUTED });
   });

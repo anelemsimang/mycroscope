@@ -45,7 +45,9 @@ p { margin: 0 0 0.8rem; }
   border-bottom: 1px solid var(--line); backdrop-filter: blur(10px);
 }
 .header-inner { display: flex; align-items: center; gap: 1rem; min-height: 72px; }
-.logo { font-weight: 800; font-size: 1.25rem; text-decoration: none; color: var(--navy); }
+.logo { display: inline-flex; align-items: center; line-height: 0; text-decoration: none; }
+.logo img { height: 52px; width: auto; max-width: none; display: block; }
+.logo-on-dark img { height: 64px; }
 .nav-check { position: absolute; opacity: 0; pointer-events: none; }
 .nav-toggle { display: none; margin-left: auto; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 0.4rem 0.7rem; }
 .nav { display: flex; gap: 1.1rem; align-items: center; margin-left: 1.5rem; }

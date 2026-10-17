@@ -140,6 +140,7 @@ export default function Billing() {
   const plan = data.catalogue.find((p) => p.key === s.plan) ?? null;
   const pending = data.catalogue.find((p) => p.key === s.pending_plan) ?? null;
   const purchased = Math.max(0, s.seats);
+  const unlimited = s.plan !== 'free' && s.seat_cap === null;
   const seatGroups = groupSeats(data.seats);
 
   function reviewPurchase(target: PlanCatalogueEntry) {
@@ -147,6 +148,25 @@ export default function Billing() {
     const count = Number(addSeats);
     const seats = adding && Number.isInteger(count) && count > 0 ? count : Math.max(1, s.seats_used);
     openWebsiteCheckout(target.key, seats);
+  }
+
+  async function addPrivilegedSeats() {
+    setPayError(null);
+    const count = Number(addSeats);
+    if (!Number.isInteger(count) || count < 1 || count > 10000) {
+      setPayError('Choose how many seats to add.');
+      return;
+    }
+    setBusy('add-seats');
+    try {
+      await api.addGrantedSeats(count);
+      setAddSeats('1');
+      await refresh();
+    } catch (e) {
+      setPayError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function scheduleRemoval(seat: PurchasedSeat) {
@@ -223,7 +243,9 @@ export default function Billing() {
               {' · '}
               {s.plan === 'free'
                 ? `${s.seats_used} of ${plan?.seat_cap ?? 3} people`
-                : `${s.seats_used} of ${purchased} purchased seats in use`}
+                : unlimited
+                  ? `${s.seats_used} people`
+                  : `${s.seats_used} of ${purchased} purchased seats in use`}
               {plan ? ` · ${plan.retention_label} of activity` : ''}
               {s.plan !== 'free' && s.current_period_end
                 ? ` · ${s.status === 'past_due' ? 'was paid until' : 'paid until'} ${formatDate(s.current_period_end, profile.timezone)}`
@@ -246,8 +268,9 @@ export default function Billing() {
       {isOwner && plan && plan.net_price_cents > 0 ? (
         <Card title="Purchased seats">
           <Text style={styles.hint}>
-            Each seat runs for its own year from the day it was paid. Adding a seat charges that year, with VAT.
-            Removing a seat waits until that seat's end date. Nothing is refunded.
+            {unlimited
+              ? 'Seats added here run until the end of the current plan year. Removing a seat waits until that seat\'s end date.'
+              : 'Each seat runs for its own year from the day it was paid. Adding a seat charges that year, with VAT. Removing a seat waits until that seat\'s end date. Nothing is refunded.'}
           </Text>
           {seatGroups.length === 0 ? <Empty text="No seats are in their paid year." /> : seatGroups.map((group) => (
             <View key={group.period_end} style={{ gap: 6, paddingVertical: 8 }}>
@@ -265,8 +288,11 @@ export default function Billing() {
               </View>
             </View>
           ))}
-          <Field label="Seats to add" value={addSeats} onChangeText={setAddSeats} keyboardType="number-pad" hint="Each new seat is billed for one year, with VAT." />
-          <Button title="Buy seats on the website" onPress={() => reviewPurchase(plan)} />
+          <Field label="Seats to add" value={addSeats} onChangeText={setAddSeats} keyboardType="number-pad"
+            hint={unlimited ? 'These seats run until the end of the current plan year.' : 'Each new seat is billed for one year, with VAT.'} />
+          {unlimited
+            ? <Button title="Add seats" onPress={addPrivilegedSeats} loading={busy === 'add-seats'} />
+            : <Button title="Buy seats on the website" onPress={() => reviewPurchase(plan)} />}
         </Card>
       ) : null}
 

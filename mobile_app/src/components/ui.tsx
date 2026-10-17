@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 
 import type { ActivityState } from '@/lib/api';
+import { Wordmark } from '@/components/Wordmark';
 
 export const colors = {
   primary: '#1e3a8a',
@@ -20,11 +21,24 @@ export const colors = {
   away: '#9ca3af',
 };
 
-/** Navy header bar with white text, used by every stack. */
+function HeaderTitle({ children }: { children?: ReactNode }) {
+  const label = typeof children === 'string' ? children.trim() : '';
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+      <Wordmark height={18} />
+      {label ? (
+        <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '700', fontSize: 17, flexShrink: 1 }}>{label}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** Navy header bar. The white wordmark sits beside the screen name on every stack. */
 export const headerOptions = {
   headerStyle: { backgroundColor: colors.primary },
   headerTintColor: '#ffffff',
-  headerTitleStyle: { fontWeight: 'bold' as const },
+  headerTitleAlign: 'left' as const,
+  headerTitle: HeaderTitle,
   contentStyle: { backgroundColor: colors.background },
 };
 

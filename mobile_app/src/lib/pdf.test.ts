@@ -34,6 +34,7 @@ test('a written report is a real PDF covering every section', async () => {
     notice: 'Contains personal information. Handle it under POPIA.',
   });
   assert.equal(Buffer.from(bytes.subarray(0, 5)).toString(), '%PDF-');
+  assert.match(Buffer.from(bytes).toString('latin1'), /\/Subtype \/Image/);
   const doc = await PDFDocument.load(bytes);
   assert.equal(doc.getPageCount(), 2);
 });

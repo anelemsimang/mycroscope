@@ -2,6 +2,7 @@ import { Link, router } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Text, View } from 'react-native';
 
+import { Wordmark } from '@/components/Wordmark';
 import { Button, ErrorBanner, Field, Screen, colors, styles } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { useSession } from '@/lib/session';
@@ -39,9 +40,12 @@ export default function SignIn() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Screen>
-        <View style={{ marginTop: 60, marginBottom: 16, gap: 4 }}>
-          <Text style={[styles.title, { fontSize: 30 }]}>Mycroscope</Text>
-          <Text style={styles.hint}>Team activity, transparently.</Text>
+        <View style={{
+          marginTop: 48, marginBottom: 20, alignItems: 'flex-start', gap: 10,
+          backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 22, paddingHorizontal: 18,
+        }}>
+          <Wordmark height={34} />
+          <Text style={{ color: '#fff', fontSize: 14 }}>Team activity, transparently.</Text>
         </View>
         {notice ? <ErrorBanner message={notice} /> : null}
         {error ? <ErrorBanner message={error} /> : null}

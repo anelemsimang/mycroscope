@@ -52,6 +52,7 @@ export default function OperatorOrgScreen() {
       <Card title={org.name} right={<Pill text={statusName(org.status)} color={org.level === 'read_only' || org.status === 'past_due' ? colors.danger : colors.primary} />}>
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Pill text={planName(org.plan)} />
+          {org.granted ? <Pill text="No payment" color={colors.warning} /> : null}
           {org.level === 'read_only' ? <Pill text="Read only" color={colors.danger} /> : null}
           {data?.supportOpen ? <Pill text="Support access open" color={colors.warning} /> : null}
         </View>
@@ -59,9 +60,11 @@ export default function OperatorOrgScreen() {
         <InfoGrid items={[
           { label: 'Manager', value: `${org.owner_name ?? '–'}${org.owner_email ? ` · ${org.owner_email}` : ''}` },
           { label: 'Signed up', value: formatDate(org.created_at) },
-          { label: 'People', value: org.plan === 'free'
-            ? `${org.active_employees} of ${cap ?? 3}`
-            : `${org.active_employees} of ${org.seats ?? 0} purchased seats` },
+          { label: 'People', value: org.granted
+            ? `${org.active_employees} · unlimited`
+            : org.plan === 'free'
+              ? `${org.active_employees} of ${cap ?? 3}`
+              : `${org.active_employees} of ${org.seats ?? 0} purchased seats` },
           { label: 'Installed agents', value: String(org.activated_employees) },
           { label: 'Seen in 2 min', value: String(org.agents_online) },
           { label: 'Last check-in', value: org.last_activity_at ? formatRelative(org.last_activity_at) : 'never' },
@@ -93,10 +96,9 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
   }, [org]);
 
   const changes = {
-    plan: plan !== org.plan ? plan : null,
+    plan,
     status: status !== org.status ? status : null,
   };
-  const changed = Object.values(changes).some((v) => v !== null);
 
   async function save() {
     setErr(null);
@@ -124,11 +126,32 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
     }
   }
 
+  async function removePrivilege() {
+    setErr(null);
+    if (!note.trim()) return setErr('Write a note explaining the change. It is shown to the customer in their audit log.');
+    const ok = await confirmAction(
+      `Remove privilege from ${org.name}?`,
+      'The plan stays. New seats have to be paid for. People above the seats already on the account are paused. Seats already added stay until their end date.',
+      'Remove privilege',
+    );
+    if (!ok) return;
+    setSaving(true);
+    try {
+      await operatorApi.removeGrant(org.organization_id, note.trim());
+      setNote('');
+      notify('Privilege removed', 'New seats now have to be paid for.');
+      onSaved();
+    } catch (e) {
+      setErr(errorMessage(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <Card title="Subscription">
       <Text style={styles.hint}>
-        Seats are created when a payment is confirmed. Seats bought together share an end date. A seat added later has its own year.
-        Changing the plan here does not add seats. Moving the account to Free ends the purchased seats.
+        Saving a paid plan here assigns privilege and does not take a payment. For one year the account has every feature of that plan, no seat limit, and it can add seats without a payment. Remove privilege to make new seats follow the normal payment rules. Seats already added stay until their end date. Moving the account to Free ends the grant.
       </Text>
       <Text style={styles.label}>Plan</Text>
       <Segmented options={(plans.length ? plans : [{ key: plan, name: plan }]).map((p) => ({ value: p.key, label: p.name }))} value={plan as never}
@@ -139,7 +162,10 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
       <Field label="Note (required)" value={note} onChangeText={setNote} placeholder="Why this plan or status is changing"
         multiline />
       {err ? <ErrorBanner message={err} /> : null}
-      <Button title="Save changes" onPress={save} disabled={!changed} loading={saving} />
+      <Button title="Save changes" onPress={save} disabled={!note.trim()} loading={saving} />
+      {org.granted ? (
+        <Button title="Remove privilege" variant="secondary" onPress={removePrivilege} disabled={!note.trim()} loading={saving} />
+      ) : null}
     </Card>
   );
 }

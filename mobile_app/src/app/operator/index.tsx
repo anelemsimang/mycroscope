@@ -53,9 +53,10 @@ export default function OperatorHome() {
 
   const all = data?.orgs ?? [];
   const plans = data?.plans ?? [];
-  const capOf = (o: OperatorOrg) => o.plan === 'free' || !o.plan
-    ? plans.find((p) => p.key === (o.plan ?? 'free'))?.seat_cap ?? 3
-    : o.seats ?? 0;
+  const capOf = (o: OperatorOrg) => o.granted ? null
+    : o.plan === 'free' || !o.plan
+      ? plans.find((p) => p.key === (o.plan ?? 'free'))?.seat_cap ?? 3
+      : o.seats ?? 0;
   const counts = useMemo(() => ({
     all: all.length,
     attention: all.filter((o) => needsAttention(o, clock, capOf(o))).length,
@@ -180,7 +181,7 @@ export default function OperatorHome() {
             </View>
             {wide ? (
               <>
-                <Text style={[local.col, local.cPlan, local.cell]}>{planName(o.plan)}</Text>
+                <Text style={[local.col, local.cPlan, local.cell]}>{planName(o.plan)}{o.granted ? ' · no payment' : ''}</Text>
                 <Text style={[local.col, local.cStatus, local.cell, statusTone(o)]}>{statusName(o.status)}{o.level === 'read_only' ? ' · read only' : ''}</Text>
                 <Text style={[local.col, local.cNum, local.cell]}>{peopleLabel(o.active_employees, capOf(o))}</Text>
                 <Text style={[local.col, local.cNum, local.cell]}>{o.agents_online} / {o.activated_employees}</Text>
@@ -188,7 +189,7 @@ export default function OperatorHome() {
               </>
             ) : (
               <Text style={styles.hint}>
-                {planName(o.plan)} · {statusName(o.status)} · {peopleLabel(o.active_employees, capOf(o))} people · {o.agents_online}/{o.activated_employees} agents · {o.last_activity_at ? formatRelative(o.last_activity_at) : 'never'}
+                {planName(o.plan)}{o.granted ? ' · no payment' : ''} · {statusName(o.status)} · {peopleLabel(o.active_employees, capOf(o))} people · {o.agents_online}/{o.activated_employees} agents · {o.last_activity_at ? formatRelative(o.last_activity_at) : 'never'}
               </Text>
             )}
           </Pressable>

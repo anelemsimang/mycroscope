@@ -3,9 +3,10 @@ import { Stack, router, usePathname, type Href } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Text, View } from 'react-native';
 
-import { Loading, colors, headerOptions } from '@/components/ui';
+import { Wordmark } from '@/components/Wordmark';
+import { colors, headerOptions } from '@/components/ui';
 import { clearStoredCheckout, readStoredCheckout, safeCheckoutPath } from '@/lib/checkoutPath';
 import { SessionProvider, useSession } from '@/lib/session';
 import { isConfigured } from '@/lib/supabase';
@@ -66,8 +67,9 @@ function RootNavigator() {
   }, [isLoading, signedIn, operator, isManager, pathname]);
   if (isLoading) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <Loading label="Opening Mycroscope" />
+      <View style={{ flex: 1, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', gap: 18 }}>
+        <Wordmark height={36} />
+        <ActivityIndicator color="#fff" accessibilityLabel="Opening Mycroscope" />
       </View>
     );
   }

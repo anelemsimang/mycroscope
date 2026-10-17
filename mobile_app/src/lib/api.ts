@@ -403,6 +403,8 @@ export interface OperatorOrg {
   last_activity_at: string | null;
   current_period_end: string | null;
   support_access_until: string | null;
+  /** Set only for the control panel. The customer app never receives this. */
+  granted?: boolean;
 }
 
 export interface SystemHealth {
@@ -707,6 +709,7 @@ export const api = {
     p_plan: plan, p_commit: false, p_seats: seats ?? null,
   }),
   purchasedSeats: () => rpc<PurchasedSeat[]>('list_subscription_seats'),
+  addGrantedSeats: (seats: number) => rpc<void>('add_granted_seats', { p_seats: seats }),
   scheduleSeatRemoval: (seat: string) => rpc<void>('schedule_seat_removal', { p_seat: seat }),
   keepSeat: (seat: string) => rpc<void>('keep_subscription_seat', { p_seat: seat }),
 
@@ -1031,6 +1034,8 @@ export const operatorApi = {
   supportSnapshot: (org: string) => rpc<SupportSnapshotRow[]>('op_support_snapshot', { p_org: org }),
   deleteOrganization: (org: string, confirmName: string) =>
     rpc<void>('op_delete_organization', { p_org: org, p_confirm_name: confirmName }),
+  removeGrant: (org: string, note: string) =>
+    rpc<void>('op_remove_operator_grant', { p_org: org, p_note: note }),
   aiTools: () => rpc<OperatorAiTool[]>('op_ai_tools'),
   saveAiTool: (id: string | null, name: string, domains: string[], apps: string[], enabled: boolean) =>
     rpc<OperatorAiTool>('op_save_ai_tool', { p_id: id, p_name: name, p_domains: domains, p_apps: apps, p_enabled: enabled }),

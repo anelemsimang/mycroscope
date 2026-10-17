@@ -8,8 +8,15 @@ import { useSession } from '@/lib/session';
 /** Width from which the header offers a direct "All employees" button (desktop browsers, tablets). */
 const WIDE = 768;
 
+type StackNav = { canGoBack: () => boolean };
+
+/** Pop back to the dashboard. replace() drops the nested stack on web and leaves a blank page. */
 function goToDashboard(manager: boolean) {
-  router.replace((manager ? '/overview' : '/me') as Href);
+  const href = (manager ? '/overview' : '/me') as Href;
+  setTimeout(() => {
+    if (router.canDismiss()) router.dismissTo(href);
+    else router.navigate(href);
+  }, 0);
 }
 
 function HeaderLink({ label, side, onPress, accessibilityLabel }: {
@@ -56,7 +63,7 @@ export default function AppLayout() {
     );
   }
 
-  const inner = (title: string) => ({ navigation }: { navigation: { canGoBack: () => boolean } }) => ({
+  const inner = (title: string) => ({ navigation }: { navigation: StackNav }) => ({
     title,
     headerBackVisible: false,
     headerLeft: () => (
@@ -65,7 +72,8 @@ export default function AppLayout() {
     ),
     ...(isManager && wide ? {
       headerRight: () => (
-        <HeaderLink side="right" label="☰ All employees" accessibilityLabel="Back to all employees" onPress={() => goToDashboard(true)} />
+        <HeaderLink side="right" label="☰ All employees" accessibilityLabel="Back to all employees"
+          onPress={() => goToDashboard(true)} />
       ),
     } : {}),
   });
@@ -74,7 +82,7 @@ export default function AppLayout() {
     <Stack screenOptions={headerOptions}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Protected guard={isManager}>
-        <Stack.Screen name="overview" options={{ title: 'Mycroscope Dashboard' }} />
+        <Stack.Screen name="overview" options={{ title: 'Dashboard' }} />
         <Stack.Screen name="reports" options={inner('Professional Report')} />
         <Stack.Screen name="register" options={inner('Register Employee')} />
         <Stack.Screen name="employee/[id]" options={inner('Employee Details')} />

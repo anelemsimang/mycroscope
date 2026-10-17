@@ -1,8 +1,9 @@
 import { Stack, router } from 'expo-router';
-import { Pressable, Text } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 
 import { MfaSetup } from '@/components/MfaSetup';
-import { Button, Card, Screen, headerOptions, styles } from '@/components/ui';
+import { Wordmark } from '@/components/Wordmark';
+import { Button, Card, Screen, colors, headerOptions, styles } from '@/components/ui';
 import { useSession } from '@/lib/session';
 
 /** Console for platform operators (the SaaS provider). Always requires two-factor login. */
@@ -12,7 +13,10 @@ export default function OperatorLayout() {
   if (aal.current !== 'aal2') {
     return (
       <Screen>
-        <Card title="Mycroscope operator console">
+        <View style={{ backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 16, paddingHorizontal: 18, alignItems: 'flex-start' }}>
+          <Wordmark height={28} />
+        </View>
+        <Card title="Operator console">
           <Text style={styles.hint}>
             Operator accounts must use two-factor login. Set it up now; you will need the code every time you sign in.
           </Text>
