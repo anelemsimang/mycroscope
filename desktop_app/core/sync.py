@@ -34,10 +34,14 @@ class SyncService:
                  on_auth_lost: Callable[[str], None],
                  on_connectivity: Callable[[bool], None],
                  on_service: Optional[Callable[[Optional[dict[str, Any]]], None]] = None,
-                 on_device_registered: Optional[Callable[[str], None]] = None):
+                 on_device_registered: Optional[Callable[[str], None]] = None,
+                 on_wipes: Optional[Callable[[list[dict[str, Any]]], None]] = None,
+                 on_projects: Optional[Callable[[], None]] = None):
         self.api = api
         self.on_service = on_service
         self.on_device_registered = on_device_registered
+        self.on_wipes = on_wipes
+        self.on_projects = on_projects
         self.store = store
         self.identity = identity
         self.clock = clock
@@ -107,6 +111,7 @@ class SyncService:
 
     def sync_once(self, force_status: bool = False) -> None:
         now = time.time()
+        self._pull_wipes()
         self._ensure_device()
         self._push_sessions()
         self._push_segments()
@@ -122,11 +127,36 @@ class SyncService:
             self.store.prune(self.clock.now() - timedelta(days=SYNCED_RETENTION_DAYS))
             self._last_prune = now
 
+    def _pull_wipes(self) -> None:
+        """Apply activity deletions before uploading, so deleted time is not sent back."""
+        if self.on_wipes is None:
+            return
+        key = f"wipe_cursor:{self.identity.employee_id}"
+        try:
+            cursor = int(self.store.get(key) or "0")
+        except ValueError:
+            cursor = 0
+        try:
+            rows = self.api.rpc("get_my_activity_wipes", {"p_after": cursor}) or []
+        except ApiError as exc:
+            if exc.code == "PGRST202":
+                return
+            raise
+        if not rows:
+            return
+        self.on_wipes(rows)
+        self.store.set(key, str(max(int(row["id"]) for row in rows)))
+
     def refresh_policy(self) -> None:
         rows = self.api.rpc("get_my_policy_status")
         self._last_policy = time.time()
         if rows:
             self.on_policy(rows[0])
+        if self.on_projects:
+            try:
+                self.on_projects()
+            except Exception:
+                log.exception("Could not refresh projects")
         if self.on_service:
             try:
                 status = self.api.rpc("get_my_service_status")

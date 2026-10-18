@@ -173,6 +173,16 @@ class SegmentEngine:
                 (now - self._last_persist).total_seconds() >= PERSIST_OPEN_SEGMENT_SECONDS:
             self._persist_open(now)
 
+    def discard_started_in(self, start: datetime, end: datetime) -> None:
+        """Drop the in-progress segment when it belongs to a period deleted on the server.
+
+        The next tick starts a new segment from the last sample, so deleted project
+        time is not saved again.
+        """
+        seg = self.open
+        if seg is not None and start <= seg["started_at"] < end:
+            self.open = None
+
     def stop(self, now: datetime) -> None:
         """Close the open segment (logout, pause of the agent, shutdown)."""
         if self.open is not None:

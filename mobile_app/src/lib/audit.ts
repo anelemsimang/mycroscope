@@ -94,7 +94,7 @@ export function describeAudit(
     case 'activity_deleted':
       return {
         actor, title: `Deleted ${target}'s activity`,
-        detail: `${str(d.segments)} record(s)${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}${d.work_location_days ? `, ${str(d.work_location_days)} office/remote day(s)` : ''}, ${range}. Reason: ${str(d.reason)}`,
+        detail: `${str(d.segments)} record(s)${d.projects_removed ? `, ${str(d.projects_removed)} project(s) with no time left` : ''}${d.offline_entries ? `, ${str(d.offline_entries)} time-away answer(s)` : ''}${d.work_location_days ? `, ${str(d.work_location_days)} office/remote day(s)` : ''}, ${range}. Reason: ${str(d.reason)}`,
       };
     case 'employee_deleted':
       return { actor, title: `Deleted employee ${str(d.name) || target}`, detail: `Reason: ${str(d.reason)}` };

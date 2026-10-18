@@ -171,6 +171,27 @@ class EngineTests(unittest.TestCase):
         self.assertIsNone(segs[1]["app_name"])
         h.assert_contiguous(self)
 
+    def test_a_deleted_period_drops_project_time_and_starts_again(self):
+        h = Harness()
+        h.run(30, project="p1")
+        self.assertIsNotNone(h.engine.open)
+        h.store.save_segment({
+            "id": "kept", "organization_id": "org", "employee_id": "emp", "device_id": "dev",
+            "session_id": "sess", "project_id": "older", "state": "active",
+            "started_at": T0 - timedelta(days=2), "ended_at": T0 - timedelta(days=2) + timedelta(seconds=10),
+            "app_name": "Word", "process_name": "word.exe", "window_title": None, "url": None, "domain": None,
+        })
+        h.store.drop_recorded("emp", T0, T0 + timedelta(hours=1))
+        h.engine.discard_started_in(T0, T0 + timedelta(hours=1))
+        self.assertIsNone(h.engine.open)
+        self.assertEqual([s["id"] for s in h.segments()], ["kept"])
+        h.run(10, project=None)
+        fresh = [s for s in h.segments() if s["id"] != "kept"]
+        self.assertEqual(len(fresh), 1)
+        self.assertIsNone(fresh[0]["project_id"])
+        self.assertLess(
+            (parse_iso(fresh[0]["ended_at"]) - parse_iso(fresh[0]["started_at"])).total_seconds(), 20)
+
     def test_time_never_goes_backwards(self):
         h = Harness()
         h.run(10)
@@ -210,6 +231,73 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(parse_iso(iso(dt)), dt)
         self.assertEqual(parse_iso("2026-01-02T03:04:05.6789+02:00"),
                          datetime(2026, 1, 2, 1, 4, 5, 678900, tzinfo=timezone.utc))
+
+
+class WipeTests(unittest.TestCase):
+    def test_sync_applies_a_wipe_before_remembering_it(self):
+        from core.sync import SyncService
+
+        h = Harness()
+        h.run(10, project="p1")
+        h.stop()
+        self.assertEqual(h.store.count_pending("emp"), 1)
+        seen = []
+
+        class Api:
+            def rpc(self, fn, args=None):
+                after = int((args or {}).get("p_after") or 0)
+                if fn != "get_my_activity_wipes":
+                    return []
+                if after >= 4:
+                    return []
+                return [{"id": 4, "wiped_from": iso(T0 - timedelta(minutes=1)),
+                         "wiped_to": iso(T0 + timedelta(hours=1))}]
+
+        sync = SyncService(
+            Api(), h.store, Identity("org", "emp", "dev", "sess"), type("C", (), {"now": staticmethod(lambda: T0)})(),
+            status_provider=dict, on_policy=lambda p: None, on_auth_lost=lambda m: None,
+            on_connectivity=lambda o: None, on_wipes=lambda rows: seen.append(rows),
+        )
+        sync._pull_wipes()
+        self.assertEqual(seen[0][0]["id"], 4)
+        self.assertEqual(h.store.get("wipe_cursor:emp"), "4")
+        sync._pull_wipes()
+        self.assertEqual(len(seen), 1)
+
+    def test_wipe_covering_now_clears_the_desktop_project(self):
+        from types import SimpleNamespace
+        from core.agent import Agent
+
+        h = Harness()
+        h.run(30, project="p1")
+        agent = Agent.__new__(Agent)
+        agent.store = h.store
+        agent.profile = SimpleNamespace(employee_id="emp")
+        agent.project_id = "p1"
+        agent.engine = h.engine
+        agent._engine_lock = __import__("threading").Lock()
+        agent.clock = SimpleNamespace(now=lambda: T0 + timedelta(seconds=40))
+        agent.projects = [{"id": "p1", "name": "Website"}]
+        refreshed = []
+        agent.refresh_projects = lambda: refreshed.append("projects")
+        agent.on_change = lambda kind: refreshed.append(kind)
+        agent.apply_wipes([{
+            "id": 1,
+            "wiped_from": iso(T0),
+            "wiped_to": iso(T0 + timedelta(hours=1)),
+        }])
+        self.assertIsNone(agent.project_id)
+        self.assertIsNone(h.engine.open)
+        self.assertEqual(h.segments(), [])
+        self.assertIn("projects", refreshed)
+
+        agent.project_id = "p2"
+        agent.apply_wipes([{
+            "id": 2,
+            "wiped_from": iso(T0 - timedelta(days=3)),
+            "wiped_to": iso(T0 - timedelta(days=2)),
+        }])
+        self.assertEqual(agent.project_id, "p2")
 
 
 class SettingsTests(unittest.TestCase):

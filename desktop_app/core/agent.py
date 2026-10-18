@@ -29,7 +29,7 @@ from core.offline import REASONS, OfflinePrompt, ReturnTracker, clean_note
 from core.store import LocalStore
 from core.sync import SyncService
 from utils.logger import get_logger
-from utils.timeutil import AgentClock
+from utils.timeutil import AgentClock, parse_iso
 
 log = get_logger("agent")
 
@@ -364,6 +364,8 @@ class Agent:
             on_connectivity=lambda online: self.on_change("connectivity"),
             on_service=self._apply_service,
             on_device_registered=self._register_report_key,
+            on_wipes=self.apply_wipes,
+            on_projects=self.refresh_projects,
         )
         self.returns.reset()
         self.places.reset()
@@ -687,6 +689,34 @@ class Agent:
         self.paused = paused
         self.sync.record_event("pause" if paused else "resume", {})
         self.sync.poke()
+        self.on_change("state")
+
+    def apply_wipes(self, rows: list[dict[str, Any]]) -> None:
+        """Clear a period that was deleted in the web app, including the open project segment."""
+        if not self.profile:
+            return
+        now = self.clock.now()
+        ranges: list[tuple[datetime, datetime]] = []
+        covers_now = False
+        for row in rows:
+            start, end = parse_iso(row.get("wiped_from")), parse_iso(row.get("wiped_to"))
+            if start is None or end is None or end <= start:
+                continue
+            ranges.append((start, end))
+            if start <= now < end:
+                covers_now = True
+        if not ranges:
+            return
+        if covers_now:
+            self.project_id = None
+        with self._engine_lock:
+            for start, end in ranges:
+                self.store.drop_recorded(self.profile.employee_id, start, end)
+                if self.engine:
+                    self.engine.discard_started_in(start, end)
+                log.info("Cleared local activity from %s to %s", start.isoformat(), end.isoformat())
+        self.refresh_projects()
+        self.on_change("projects")
         self.on_change("state")
 
     def refresh_projects(self) -> None:

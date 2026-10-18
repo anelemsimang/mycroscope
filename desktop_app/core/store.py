@@ -200,6 +200,26 @@ class LocalStore:
                 totals[r["state"]] += int((e - s).total_seconds())
         return totals
 
+    def drop_recorded(self, employee_id: str, start: datetime, end: datetime) -> None:
+        """Forget a period the server has deleted, including rows not yet uploaded."""
+        with self._lock:
+            self._db.execute(
+                "delete from segments where employee_id = ? and started_at >= ? and started_at < ?",
+                (employee_id, iso(start), iso(end)),
+            )
+            self._db.execute(
+                "delete from events where employee_id = ? and occurred_at >= ? and occurred_at < ?",
+                (employee_id, iso(start), iso(end)),
+            )
+            self._db.execute(
+                "delete from file_events where employee_id = ? and occurred_at >= ? and occurred_at < ?",
+                (employee_id, iso(start), iso(end)),
+            )
+            self._db.execute(
+                "delete from offline_entries where employee_id = ? and started_at >= ? and started_at < ?",
+                (employee_id, iso(start), iso(end)),
+            )
+
     def prune(self, before: datetime) -> int:
         with self._lock:
             cur = self._db.execute(

@@ -62,14 +62,17 @@ export default function DeleteActivity() {
     if (!reason.trim()) return setError('Enter a reason (kept in the audit log).');
     const ok = await confirmAction(
       `Delete ${emp!.name}'s activity?`,
-      `This permanently deletes ${b.text} for ${emp!.name}. It cannot be undone.`,
+      `This permanently deletes ${b.text} for ${emp!.name}, including time recorded on projects. It cannot be undone.`,
       'Delete',
     );
     if (!ok) return;
     setBusy(true);
     try {
       const removed = await api.deleteActivity(id, b.fromIso, b.toIso, reason.trim());
-      notify('Activity deleted', `${removed} record(s) removed. The deletion is recorded in the audit log.`);
+      notify(
+        'Activity deleted',
+        `${removed} record(s) removed, including project time in that period. The desktop window clears it the next time it connects. The deletion is recorded in the audit log.`,
+      );
       if (router.canGoBack()) router.back(); else router.replace({ pathname: '/employee/[id]', params: { id } });
     } catch (e) {
       setError(errorMessage(e));
@@ -83,7 +86,9 @@ export default function DeleteActivity() {
       <Card title={`Delete activity for ${emp.name}`}>
         <Text style={styles.hint}>
           Use this for data recorded by mistake (for example while testing) or for a POPIA deletion request.
-          Days are calendar days in {tz}.
+          Days are calendar days in {tz}. Time recorded on a project in this period is removed too.
+          A project with no recorded time left is removed from the project list, including in the desktop window.
+          The desktop window clears this period the next time it connects.
         </Text>
       </Card>
       {error ? <ErrorBanner message={error} /> : null}
@@ -96,7 +101,7 @@ export default function DeleteActivity() {
       ) : null}
       {scope === 'all' ? (
         <Text style={{ color: colors.danger }}>
-          Everything recorded for {emp.name} will be removed. Their account stays; use Manage to delete the account too.
+          Everything recorded for {emp.name} will be removed, including time on projects. Projects with no time left are removed from the desktop project list. Their account stays; use Manage to delete the account too.
         </Text>
       ) : null}
       <Field label="Reason (required)" value={reason} onChangeText={setReason}
