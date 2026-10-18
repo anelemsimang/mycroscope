@@ -1,11 +1,12 @@
 // Emails owners when a paid month has ended and the grace window is open.
 // Deploy with --no-verify-jwt. Secrets: CRON_SECRET, and for the payment link YOCO_SECRET_KEY.
-// Email needs RESEND_API_KEY, EMAIL_FROM, and APP_URL. The nightly database job still moves
-// a company to Free after the grace window even if this function is not called.
+// Email needs BREVO_API_KEY and APP_URL. Mail is sent as Mycroscope <info@mycroscope.co.za> unless EMAIL_FROM is set.
+// The nightly database job still moves a company to Free after the grace window even if this function is not called.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { timingSafeEqual } from '../_shared/billing.ts';
 import { env, json } from '../_shared/http.ts';
+import { brevoKey, sendEmails } from '../_shared/mail.ts';
 
 interface RenewalRow {
   intent_id: string;
@@ -31,11 +32,10 @@ Deno.serve(async (req) => {
   if (error) return json({ error: error.message }, 500);
   const rows = (data ?? []) as RenewalRow[];
 
-  const apiKey = env('RESEND_API_KEY');
-  const from = env('EMAIL_FROM');
+  const apiKey = brevoKey();
   const appUrl = (env('APP_URL') ?? '').replace(/\/+$/, '');
   const yocoKey = env('YOCO_SECRET_KEY');
-  if (!apiKey || !from) return json({ due: rows.length, emailed: 0, note: 'Email is not configured' });
+  if (!apiKey) return json({ due: rows.length, emailed: 0, note: 'Email is not configured' });
 
   let emailed = 0;
   for (const row of rows) {
@@ -78,14 +78,8 @@ Deno.serve(async (req) => {
       '',
       'Seats you do not renew end on that date. People and history are not deleted.',
     ].join('\n');
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from, to: [row.owner_email], subject: 'Mycroscope payment due', text,
-      }),
-    });
-    if (res.ok) {
+    const { sent } = await sendEmails([{ to: row.owner_email, subject: 'Mycroscope payment due', text }]);
+    if (sent) {
       emailed += 1;
       await admin.rpc('mark_billing_notice', { p_org: row.organization_id, p_period: row.period_end });
     }

@@ -10,6 +10,7 @@ import {
 } from '../_shared/advisor.ts';
 import { timingSafeEqual } from '../_shared/billing.ts';
 import { CORS, env, json } from '../_shared/http.ts';
+import { brevoKey, sendEmails } from '../_shared/mail.ts';
 
 const TEMPLATES = new Set<ReportTemplate>(['week', 'workload', 'software', 'capacity', 'trend']);
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
@@ -221,25 +222,15 @@ async function weekly(admin: SupabaseClient): Promise<Response> {
 }
 
 async function emailNote(admin: SupabaseClient, row: QueueRow, note: string): Promise<number> {
-  const apiKey = env('RESEND_API_KEY');
-  const from = env('EMAIL_FROM');
-  if (!apiKey || !from) return 0;
+  if (!brevoKey()) return 0;
   const { data, error } = await admin.rpc('coaching_recipients', { p_org: row.organization_id, p_team: row.team_id });
   if (error || !data?.length) return 0;
   const subject = `Weekly report${row.team_name ? `: ${row.team_name}` : ''}`;
   const text = `${note}\n\nThis report was written by Mycroscope from the figures it already stores.`;
-  const res = await fetch('https://api.resend.com/emails/batch', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify((data as { email: string }[]).slice(0, 50).map((recipient) => ({
-      from, to: [recipient.email], subject, text,
-    }))),
-  });
-  if (!res.ok) {
-    console.error('Report email failed', res.status);
-    return 0;
-  }
-  return (data as unknown[]).length;
+  const { sent } = await sendEmails((data as { email: string }[]).slice(0, 50).map((recipient) => ({
+    to: recipient.email, subject, text,
+  })));
+  return sent;
 }
 
 interface QueueRow {

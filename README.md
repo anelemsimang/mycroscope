@@ -129,8 +129,8 @@ the owner already chose.
    supabase secrets set YOCO_SECRET_KEY=sk_test_... YOCO_WEBHOOK_SECRET=whsec_...
    ```
 
-   `APP_URL` and `CRON_SECRET` are already set. The morning payment email also needs `RESEND_API_KEY` and
-   `EMAIL_FROM` (section 7). The account still moves to Free after the grace window if email is not configured.
+   `APP_URL` and `CRON_SECRET` are already set. The morning payment email also needs `BREVO_API_KEY`
+   (section 7). The account still moves to Free after the grace window if email is not configured.
 3. In Yoco, subscribe to `payment.succeeded` at
    `https://YOUR_PROJECT_REF.supabase.co/functions/v1/yoco-webhook`.
 4. Before the first tax invoice, set the supplier VAT number. The business name is already stored.
@@ -147,24 +147,35 @@ functions are still in the repository. The billing screen uses Yoco.
 
 Without `YOCO_SECRET_KEY` the billing page says online payment is not set up.
 
-## 7. Manager emails (Resend)
+## 7. Manager emails (Brevo)
 
 Managers get a Monday-morning summary and, at most hourly, a notice when new integrity alerts appear. Emails
-contain counts only (no names or activity details). Each manager can turn them off under Account.
+contain counts only (no names or activity details). Each manager can turn them off under Account. Payment
+reminders and the weekly written report use the same sender.
 
-1. Create a [Resend](https://resend.com) account, add and verify a sending domain (DNS records), create an API key.
+Mail is sent through Brevo's transactional SMTP API as `Mycroscope <info@mycroscope.co.za>`. That address
+must be a verified sender on the `mycroscope.co.za` domain in Brevo. These are individual notices, not a marketing
+campaign, so they are not created with the email-campaigns API.
+
+1. In Brevo, open SMTP & API, create an API key, and confirm `info@mycroscope.co.za` is allowed to send.
 2. Deploy:
 
    ```powershell
-   supabase secrets set RESEND_API_KEY=re_... EMAIL_FROM="Mycroscope <alerts@mail.example.co.za>" CRON_SECRET=<long random string>
-   supabase functions deploy notify-managers --no-verify-jwt
+   supabase secrets set BREVO_API_KEY=xkeysib-... CRON_SECRET=<long random string>
+   supabase functions deploy notify-managers billing-reminders work-advisor --no-verify-jwt
    ```
 
+   Set `EMAIL_FROM` only to override the sender, as `Mycroscope <info@mycroscope.co.za>` or a bare address.
 3. Edit the placeholders in `supabase/setup/schedule_emails.sql` (function URL and the same `CRON_SECRET`) and
    run it once in the SQL editor. It enables `pg_cron`/`pg_net` and stores both values in Supabase Vault.
 
-Also recommended: under **Authentication -> Emails -> SMTP Settings**, send Supabase's own sign-up and
-password-reset emails through Resend too (Supabase's built-in sender is heavily rate-limited).
+Under **Authentication -> Emails -> SMTP Settings**, send Supabase's own sign-up and password-reset emails
+through Brevo as well (Supabase's built-in sender is heavily rate-limited):
+
+- Host `smtp-relay.brevo.com`, port `587`
+- Username: the SMTP login shown on the same Brevo page (not the API key)
+- Password: the Brevo SMTP key
+- Sender name `Mycroscope`, sender email `info@mycroscope.co.za`
 
 ## 8. Operator console (for Mycroscope staff)
 
@@ -246,7 +257,7 @@ tracked computer time. From the migration below, productive totals can also incl
   `https://<project>.supabase.co/functions/v1/api/v1/` + `employees`, `daily-totals?from=YYYY-MM-DD&to=YYYY-MM-DD`,
   `usage?from=...&to=...` (at most 93 days) or `alerts?since=<ISO time>`.
 
-Deploy the functions (alerts to Slack/Teams/webhooks also need the section 7 cron job, even without Resend):
+Deploy the functions (alerts to Slack/Teams/webhooks also need the section 7 cron job, even without Brevo):
 
 ```powershell
 supabase functions deploy notify-managers --no-verify-jwt
@@ -335,8 +346,8 @@ supabase functions deploy work-advisor --no-verify-jwt
 ```
 
 No API key is required. Then run `supabase/setup/schedule_advisor.sql` in the SQL editor after replacing the project
-URL. The same `CRON_SECRET` as the manager emails is reused. Weekly email uses the existing `RESEND_API_KEY` and
-`EMAIL_FROM`. The desktop app does not change for this.
+URL. The same `CRON_SECRET` as the manager emails is reused. Weekly email uses the existing `BREVO_API_KEY`
+and is sent as info@mycroscope.co.za. The desktop app does not change for this.
 
 `20261021090000_free_plan.sql` (apply after the one above) added the **free plan**: up to 3 active people, and detailed
 activity kept for 30 days. Paid reports are not included. Recording continues. A fourth person cannot be added or
@@ -381,7 +392,7 @@ their MFA factor, after confirming their identity out of band.
 - [ ] Authentication: Site URL and `https://<domain>/auth/*` redirect set; "Confirm email" on; custom SMTP set.
 - [ ] Web app deployed (section 4) with HTTPS on your own domain.
 - [ ] Yoco test key and webhook secret set, `payment.succeeded` webhook configured, one test payment confirmed by the webhook.
-- [ ] Resend domain verified; a test digest received (`kind: "digest"` request, see `schedule_emails.sql`).
+- [ ] Brevo sender `info@mycroscope.co.za` verified; a test digest received (`kind: "digest"` request, see `schedule_emails.sql`).
 - [ ] Desktop agent built with a code-signing certificate; update host serving `manifest.json`; installed on a
       test PC with `install-machine.ps1` and checked: starts for a standard user, restarts when killed, updates.
 - [ ] Operator account created with two-factor login.

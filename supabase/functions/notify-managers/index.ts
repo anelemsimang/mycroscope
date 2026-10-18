@@ -1,5 +1,5 @@
 // Weekly digest and alert emails, plus Slack / Teams / webhook alerts; called by pg_cron. Deploy with --no-verify-jwt.
-// Secrets: CRON_SECRET, RESEND_API_KEY, EMAIL_FROM (e.g. "Mycroscope <alerts@mail.example.co.za>"), APP_URL.
+// Secrets: CRON_SECRET, BREVO_API_KEY, APP_URL. Sender is Mycroscope <info@mycroscope.co.za> unless EMAIL_FROM is set.
 // Channels are posted to even when email is not configured.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -7,8 +7,7 @@ import { type ChannelAlert, deliver } from '../_shared/alerts.ts';
 import { timingSafeEqual } from '../_shared/billing.ts';
 import { type AlertRow, type DigestRow, type Email, renderAlert, renderDigest } from '../_shared/email.ts';
 import { env, json } from '../_shared/http.ts';
-
-const BATCH = 100;
+import { brevoKey, sendEmails } from '../_shared/mail.ts';
 
 interface ChannelBatchRow {
   channel_id: string;
@@ -20,34 +19,13 @@ interface ChannelBatchRow {
   alerts: ChannelAlert[] | null;
 }
 
-async function send(emails: Email[], apiKey: string, from: string): Promise<{ sent: number; failed: number }> {
-  let sent = 0;
-  let failed = 0;
-  for (let i = 0; i < emails.length; i += BATCH) {
-    const chunk = emails.slice(i, i + BATCH);
-    const res = await fetch('https://api.resend.com/emails/batch', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(chunk.map((e) => ({ from, to: [e.to], subject: e.subject, text: e.text, html: e.html }))),
-    });
-    if (res.ok) {
-      sent += chunk.length;
-    } else {
-      failed += chunk.length;
-      console.error('Resend batch failed', res.status, await res.text().catch(() => ''));
-    }
-  }
-  return { sent, failed };
-}
-
 Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const cronSecret = env('CRON_SECRET');
   const given = req.headers.get('x-cron-secret') ?? '';
   if (!cronSecret || !timingSafeEqual(given, cronSecret)) return json({ error: 'Forbidden' }, 403);
 
-  const apiKey = env('RESEND_API_KEY');
-  const from = env('EMAIL_FROM');
+  const apiKey = brevoKey();
   const appUrl = (env('APP_URL') ?? '').replace(/\/+$/, '');
 
   let kind: unknown;
@@ -57,8 +35,8 @@ Deno.serve(async (req) => {
     kind = undefined;
   }
   if (kind !== 'digest' && kind !== 'alerts') return json({ error: 'kind must be "digest" or "alerts"' }, 400);
-  if (kind === 'digest' && (!apiKey || !from)) {
-    return json({ error: 'Email is not configured (RESEND_API_KEY, EMAIL_FROM)' }, 503);
+  if (kind === 'digest' && !apiKey) {
+    return json({ error: 'Email is not configured (BREVO_API_KEY)' }, 503);
   }
 
   const admin = createClient(env('SUPABASE_URL')!, env('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -79,7 +57,7 @@ Deno.serve(async (req) => {
     if (error) return json({ error: error.message }, 500);
     emails = ((data ?? []) as AlertRow[]).map((r) => renderAlert(r, appUrl));
   }
-  const result = apiKey && from ? await send(emails, apiKey, from) : { sent: 0, failed: 0, email: 'not configured' };
+  const result = apiKey ? await sendEmails(emails) : { sent: 0, failed: 0, email: 'not configured' };
 
   const channels = { posted: 0, failed: 0 };
   if (kind === 'alerts') {
