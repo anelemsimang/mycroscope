@@ -1,17 +1,16 @@
 import { Stack, router, type Href } from 'expo-router';
-import { Platform, Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { type ReactNode } from 'react';
+import { Pressable, Text, View } from 'react-native';
 
+import { Wordmark } from '@/components/Wordmark';
 import { MfaSetup } from '@/components/MfaSetup';
 import { Button, Card, Screen, headerOptions, styles } from '@/components/ui';
 import { useSession } from '@/lib/session';
 
-/** Width from which the header offers a direct "All employees" button (desktop browsers, tablets). */
-const WIDE = 768;
-
 type StackNav = { canGoBack: () => boolean };
 
-/** Pop back to the dashboard. replace() drops the nested stack on web and leaves a blank page. */
-function goToDashboard(manager: boolean) {
+/** Pop back to the employee list. replace() drops the nested stack on web and leaves a blank page. */
+function goHome(manager: boolean) {
   const href = (manager ? '/overview' : '/me') as Href;
   setTimeout(() => {
     if (router.canDismiss()) router.dismissTo(href);
@@ -19,25 +18,8 @@ function goToDashboard(manager: boolean) {
   }, 0);
 }
 
-function HeaderLink({ label, side, onPress, accessibilityLabel }: {
-  label: string; side: 'left' | 'right'; onPress: () => void; accessibilityLabel: string;
-}) {
-  return (
-    <Pressable hitSlop={8} onPress={onPress} accessibilityRole="button" accessibilityLabel={accessibilityLabel}
-      style={({ pressed }) => [
-        side === 'left' ? { paddingRight: 12 } : { paddingHorizontal: 12, paddingVertical: 6, marginRight: 8,
-          borderWidth: 1, borderColor: 'rgba(255,255,255,0.6)', borderRadius: 6 },
-        pressed && { opacity: 0.7 },
-      ]}>
-      <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>{label}</Text>
-    </Pressable>
-  );
-}
-
 export default function AppLayout() {
   const { profile, isManager, reloadProfile, signOut, service, aal } = useSession();
-  const { width } = useWindowDimensions();
-  const wide = Platform.OS === 'web' || width >= WIDE;
 
   if (!profile) {
     return (
@@ -63,26 +45,47 @@ export default function AppLayout() {
     );
   }
 
+  const brandTitle = ({ children }: { children?: ReactNode }) => {
+    const label = typeof children === 'string' ? children.trim() : '';
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 }}>
+        <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel="Mycroscope"
+          onPress={() => goHome(isManager)}
+          style={({ pressed }) => pressed && { opacity: 0.7 }}>
+          <Wordmark height={18} />
+        </Pressable>
+        {label ? (
+          <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '700', fontSize: 17, flexShrink: 1 }}>{label}</Text>
+        ) : null}
+      </View>
+    );
+  };
+
   const inner = (title: string) => ({ navigation }: { navigation: StackNav }) => ({
     title,
     headerBackVisible: false,
     headerLeft: () => (
-      <HeaderLink side="left" label="‹ Back" accessibilityLabel="Back"
-        onPress={() => (navigation.canGoBack() ? router.back() : goToDashboard(isManager))} />
+      <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel="Back"
+        onPress={() => (navigation.canGoBack() ? router.back() : goHome(isManager))}
+        style={({ pressed }) => [{ paddingRight: 8 }, pressed && { opacity: 0.7 }]}>
+        <Text style={{ color: '#fff', fontWeight: '600', fontSize: 28, lineHeight: 32 }}>‹</Text>
+      </Pressable>
     ),
-    ...(isManager && wide ? {
-      headerRight: () => (
-        <HeaderLink side="right" label="☰ All employees" accessibilityLabel="Back to all employees"
-          onPress={() => goToDashboard(true)} />
-      ),
-    } : {}),
   });
 
   return (
-    <Stack screenOptions={headerOptions}>
+    <Stack screenOptions={{
+      ...headerOptions,
+      headerTitle: brandTitle,
+      headerRight: () => (
+        <Text numberOfLines={1} style={{ color: '#fff', fontWeight: '600', fontSize: 15, marginRight: 16, maxWidth: 220 }}>
+          {profile.name}
+        </Text>
+      ),
+    }}>
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Protected guard={isManager}>
-        <Stack.Screen name="overview" options={{ title: 'Dashboard' }} />
+        <Stack.Screen name="overview" options={{ title: '', headerBackVisible: false }} />
         <Stack.Screen name="reports" options={inner('Professional Report')} />
         <Stack.Screen name="register" options={inner('Register Employee')} />
         <Stack.Screen name="employee/[id]" options={inner('Employee Details')} />

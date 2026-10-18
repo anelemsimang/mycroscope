@@ -69,8 +69,7 @@ export default function Dashboard() {
   return (
     <Screen refreshing={refreshing} onRefresh={refresh} padded={false}>
       <View style={local.header}>
-        <Text style={local.welcome}>Welcome, {profile.name}</Text>
-        <Text style={styles.hint}>Manager Dashboard · {profile.organizationName}</Text>
+        <Text style={styles.hint}>{profile.organizationName}</Text>
         {liveAllowed ? (
           <View style={[styles.row, { gap: 6, marginTop: 4 }]}>
             <View style={[local.dot, { backgroundColor: live ? colors.success : colors.danger }]} />
@@ -193,7 +192,6 @@ function TeamRowItem({ row, showLive }: { row: TeamRow; showLive: boolean }) {
 
 const local = StyleSheet.create({
   header: { backgroundColor: colors.card, padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border, gap: 2 },
-  welcome: { fontSize: 18, fontWeight: 'bold', color: colors.text },
   body: { padding: 12, gap: 12, paddingBottom: 40 },
   alerts: {
     flexDirection: 'row', gap: 8, padding: 12, borderRadius: 8, backgroundColor: '#fee2e2',
