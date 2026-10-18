@@ -42,8 +42,7 @@
       <p class="kicker">Support</p>
       <h1>Ask a question</h1>
       <p class="lede">Use this form for setup, billing, the desktop app, reports or privacy. Write from the email address where you want the reply. Do not include passwords, install keys or activity about a named person.</p>
-      <form class="form" name="support" method="POST" action="/support-received" data-netlify="true" netlify-honeypot="bot-field">
-        <input type="hidden" name="form-name" value="support">
+      <form class="form" name="support" method="POST" action="/support-message">
         <p class="hp"><label>Leave this empty <input name="bot-field" tabindex="-1" autocomplete="off"></label></p>
         <label for="name">Name
           <input id="name" name="name" type="text" autocomplete="name" required maxlength="120">

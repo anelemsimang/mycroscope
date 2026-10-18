@@ -107,6 +107,13 @@
   to = "/support-received.html"
   status = 200
 
+# The form posts here. A POST straight at a page is Netlify's "Page not found".
+[[redirects]]
+  from = "/support-message"
+  to = "/.netlify/functions/support-message"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/terms.html"
   to = "/terms"
