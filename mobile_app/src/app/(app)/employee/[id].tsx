@@ -1,4 +1,4 @@
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 
 import { EmployeeDetailView } from '@/components/EmployeeDetailView';
 import { ErrorBanner, Loading, Screen } from '@/components/ui';
@@ -15,9 +15,6 @@ export default function EmployeeDetail() {
   if (loading && !employee) return <Loading />;
   if (!employee) return <Screen><ErrorBanner message="This employee no longer exists." /></Screen>;
   return (
-    <>
-      <Stack.Screen options={{ title: employee.name }} />
-      <EmployeeDetailView employee={employee} timezone={profile.timezone} isSelf={id === profile.employeeId} canManage />
-    </>
+    <EmployeeDetailView employee={employee} timezone={profile.timezone} isSelf={id === profile.employeeId} canManage />
   );
 }

@@ -67,7 +67,7 @@ export default function AppLayout() {
     headerLeft: () => (
       <Pressable hitSlop={8} accessibilityRole="button" accessibilityLabel="Back"
         onPress={() => (navigation.canGoBack() ? router.back() : goHome(isManager))}
-        style={({ pressed }) => [{ paddingRight: 8 }, pressed && { opacity: 0.7 }]}>
+        style={({ pressed }) => [{ marginLeft: 16, marginRight: 24 }, pressed && { opacity: 0.7 }]}>
         <Text style={{ color: '#fff', fontWeight: '600', fontSize: 28, lineHeight: 32 }}>‹</Text>
       </Pressable>
     ),
@@ -88,7 +88,7 @@ export default function AppLayout() {
         <Stack.Screen name="overview" options={{ title: '', headerBackVisible: false }} />
         <Stack.Screen name="reports" options={inner('Professional Report')} />
         <Stack.Screen name="register" options={inner('Register Employee')} />
-        <Stack.Screen name="employee/[id]" options={inner('Employee Details')} />
+        <Stack.Screen name="employee/[id]" options={inner('')} />
         <Stack.Screen name="manage/[id]" options={inner('Manage Employee')} />
         <Stack.Screen name="delete-activity" options={inner('Delete Activity')} />
         <Stack.Screen name="monitoring" options={inner('Monitoring & Privacy')} />

@@ -1,4 +1,4 @@
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Text } from 'react-native';
 
@@ -80,7 +80,6 @@ export default function ManageEmployee() {
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: emp.name }} />
       {error ? <ErrorBanner message={error} /> : null}
 
       <Card title="Details">
