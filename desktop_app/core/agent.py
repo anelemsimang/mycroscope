@@ -720,8 +720,15 @@ class Agent:
         self.on_change("state")
 
     def refresh_projects(self) -> None:
+        if not self.profile:
+            return
         try:
-            self.projects = self.api.select("projects", {"is_active": "eq.true", "select": "id,name", "order": "name"})
+            self.projects = self.api.select("projects", {
+                "is_active": "eq.true",
+                "employee_id": f"eq.{self.profile.employee_id}",
+                "select": "id,name",
+                "order": "name",
+            })
         except (NetworkError, ApiError) as exc:
             log.info("Could not load projects: %s", exc)
             return
@@ -732,7 +739,7 @@ class Agent:
     def create_project(self, name: str) -> str:
         rows = self.api.insert("projects", {
             "organization_id": self.profile.organization_id, "name": name.strip(),
-            "created_by": self.profile.employee_id,
+            "created_by": self.profile.employee_id, "employee_id": self.profile.employee_id,
         }, returning=True)
         self.refresh_projects()
         return rows[0]["id"]

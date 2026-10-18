@@ -21,7 +21,7 @@ import {
   type PeriodKey,
 } from '@/lib/format';
 import { groupDayBreakdown, type DayGroup } from '@/lib/dayBreakdown';
-import { ALL_PROJECTS, NO_PROJECT, isProjectFilter, projectChoices, projectChoicesForDay, projectScopeName, projectScopePhrase } from '@/lib/projects';
+import { ALL_PROJECTS, NO_PROJECT, isProjectFilter, projectChoicesForDay, projectScopeName, projectScopePhrase } from '@/lib/projects';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
@@ -270,10 +270,10 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod, pickedDay, setP
   const projectFilter = isProjectFilter(project) ? project : null;
   const singleDay = range.from === range.to;
   const grouped = singleDay && !projectFilter;
-  const projectList = useAsync(() => api.projects(), []);
-  const dayProjects = useAsync(
-    () => (pickedDay ? api.projectTotals(id, pickedDay, pickedDay) : Promise.resolve(null)),
-    [id, pickedDay],
+  const projectList = useAsync(() => api.projects(id), [id]);
+  const workedProjects = useAsync(
+    () => api.projectTotals(id, range.from, range.to),
+    [id, range.from, range.to],
   );
   const { data, error, loading, refresh } = useAsync(async () => {
     const categories = await api.categoryTotals(id, range.from, range.to, projectFilter).catch(() => []);
@@ -303,15 +303,13 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod, pickedDay, setP
     label: `${periodLabel} · ${group.projectId ? `project ${group.name}` : 'no project'}`,
   });
   const namedProjects = projectList.data ?? [];
-  const projectOptions = namedProjects.length === 0
-    ? []
-    : pickedDay
-      ? (dayProjects.data ? projectChoicesForDay(namedProjects, dayProjects.data) : [{ value: ALL_PROJECTS, label: 'All projects' }])
-      : projectChoices(namedProjects);
+  const projectOptions = workedProjects.data
+    ? projectChoicesForDay(namedProjects, workedProjects.data)
+    : [];
   useEffect(() => {
-    if (!pickedDay || !dayProjects.data) return;
+    if (!workedProjects.data) return;
     if (!projectOptions.some((option) => option.value === project)) setProject(ALL_PROJECTS);
-  }, [pickedDay, dayProjects.data, project, projectOptions, setProject]);
+  }, [workedProjects.data, project, projectOptions, setProject]);
 
   async function downloadPdf() {
     setExporting(true);
@@ -361,7 +359,7 @@ function AppsWeb({ id, name, timezone, today, period, setPeriod, pickedDay, setP
 
   return (
     <>
-      {(pickedDay ? projectOptions.length > 1 : projectOptions.length > 0) ? (
+      {projectOptions.length > 1 ? (
         <Segmented options={projectOptions} value={project} onChange={setProject} />
       ) : null}
       <Segmented options={PERIODS} value={pickedDay ? null : period} onChange={setPeriod} />

@@ -100,7 +100,7 @@ export interface SegmentRow {
   domain: string | null;
 }
 
-export interface Project { id: string; name: string; is_active: boolean }
+export interface Project { id: string; name: string; is_active: boolean; employee_id: string }
 
 export interface ComplianceSettings {
   track_apps: boolean;
@@ -565,8 +565,11 @@ export const api = {
   timeline: (employee: string, day: Ymd, project?: string | null) =>
     rpc<TimelineRow[]>('get_timeline', { p_employee: employee, p_day: day, ...projectQuery(project) }),
 
-  projects: async () => {
-    const { data, error } = await supabase.from('projects').select('id,name,is_active').order('name');
+  /** One person's projects. Omit the person to list everyone the signed-in user can see. */
+  projects: async (employee?: string) => {
+    let query = supabase.from('projects').select('id,name,is_active,employee_id').order('name');
+    if (employee) query = query.eq('employee_id', employee);
+    const { data, error } = await query;
     if (error) throw error;
     return (data ?? []) as Project[];
   },

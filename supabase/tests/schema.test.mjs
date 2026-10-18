@@ -390,6 +390,25 @@ test('deleting activity requires a reason and is audited', async () => {
   assert.ok(res.rows[0].n >= 1);
   const audit = await asUser(ctx.ownerAuth, `select details from audit_log where action = 'activity_deleted'`);
   assert.equal(audit.rows[0].details.reason, 'Employee request');
+
+  await asUser(ctx.mgrAuth,
+    `insert into projects (organization_id, name, created_by) values ($1, 'Client A', $2)`,
+    [ctx.orgId, ctx.mgrId]);
+  const mine = await asUser(ctx.empAuth, `select name from projects order by name`);
+  assert.deepEqual(mine.rows.map((r) => r.name), ['Client A'], 'a person only sees their own projects');
+  await db.query(
+    `insert into projects (organization_id, name, created_by) values ($1, 'Leftover', $2)`,
+    [ctx.orgId, ctx.empId]);
+  await asUser(ctx.ownerAuth,
+    `select delete_activity($1, now() - interval '1 hour', now() + interval '1 hour', 'Remove empty projects')`,
+    [ctx.empId]);
+  const leftover = await db.query(`select id from projects where organization_id = $1 and name = 'Leftover'`, [ctx.orgId]);
+  assert.equal(leftover.rows.length, 0, 'a project with no time left is removed');
+  const kept = await db.query(`select id from projects where id = $1`, [ctx.projectId]);
+  assert.equal(kept.rows.length, 1, 'a project that still has time stays');
+  const other = await db.query(
+    `select id from projects where employee_id = $1 and name = 'Client A'`, [ctx.mgrId]);
+  assert.equal(other.rows.length, 1, 'another person keeps their own project of the same name');
 });
 
 test('nightly maintenance builds summaries and purges expired data', async () => {

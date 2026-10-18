@@ -15,7 +15,7 @@ import {
   PERIOD_LABELS, formatDay, formatDuration, formatTime, offlineSeconds, periodRange, toCsv, todayIn,
   type PeriodKey,
 } from '@/lib/format';
-import { ALL_PROJECTS, isProjectFilter, projectChoices, projectChoicesForDay, projectScopeName, projectScopePhrase } from '@/lib/projects';
+import { ALL_PROJECTS, isProjectFilter, projectChoicesForDay, projectScopeName, projectScopePhrase } from '@/lib/projects';
 import { useProfile } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
 
@@ -58,7 +58,7 @@ export default function Reports() {
   const projectFilter = isProjectFilter(project) ? project : null;
 
   const employees = useAsync(async () => (await api.employees()).filter((e) => e.auth_user_id), []);
-  const projects = useAsync(() => api.projects(), []);
+  const projects = useAsync(() => api.projects(who === ALL ? undefined : who), [who]);
   const features = useAsync(() => api.features(), []);
   const teamsAllowed = features.data?.includes('teams') ?? false;
   const teams = useAsync(async () => (teamsAllowed ? (await api.teams()).teams : []), [teamsAllowed]);
@@ -69,19 +69,20 @@ export default function Reports() {
   const selected = who === ALL ? people.filter((e) => e.is_active) : people.filter((e) => e.id === who);
   const selectedKey = selected.map((e) => e.id).join(',');
   const workedProjects = useAsync(async () => {
-    if (!pickedDay) return null;
-    const lists = await Promise.all(selected.map((employee) => api.projectTotals(employee.id, pickedDay, pickedDay)));
+    const lists = await Promise.all(selected.map((employee) => api.projectTotals(employee.id, range.from, range.to)));
     return lists.flat();
-  }, [pickedDay, selectedKey]);
-  const projectOptions = (projects.data?.length ?? 0) === 0
-    ? []
-    : pickedDay
-      ? (workedProjects.data ? projectChoicesForDay(projects.data ?? [], workedProjects.data) : [])
-      : projectChoices(projects.data ?? []);
+  }, [range.from, range.to, selectedKey]);
+  const ownedProjects = (projects.data ?? []).map((item) => ({
+    ...item,
+    owner: (employees.data ?? []).find((person) => person.id === item.employee_id)?.name,
+  }));
+  const projectOptions = workedProjects.data
+    ? projectChoicesForDay(ownedProjects, workedProjects.data)
+    : [];
   useEffect(() => {
-    if (!pickedDay || !workedProjects.data) return;
-    if (projectOptions.length > 0 && !projectOptions.some((option) => option.value === project)) setProject(ALL_PROJECTS);
-  }, [pickedDay, workedProjects.data, project, projectOptions]);
+    if (!workedProjects.data) return;
+    if (!projectOptions.some((option) => option.value === project)) setProject(ALL_PROJECTS);
+  }, [workedProjects.data, project, projectOptions]);
 
   const { data, error, loading, refreshing, refresh } = useAsync(async () => {
     const lines = await Promise.all(selected.map(async (employee): Promise<Line> => {
@@ -188,14 +189,17 @@ export default function Reports() {
       const websites = new Map<string, number>();
       const categories = new Map<string, number>();
       const projects = new Map<string, number>();
-      for (const pack of packs) {
+      for (const [i, pack] of packs.entries()) {
         for (const app of pack.apps) {
           const prev = apps.get(app.app_name) ?? { active: 0, idle: 0 };
           apps.set(app.app_name, { active: prev.active + app.active_seconds, idle: prev.idle + app.idle_seconds });
         }
         for (const site of pack.domains) websites.set(site.domain, (websites.get(site.domain) ?? 0) + site.active_seconds);
         for (const row of pack.categories) categories.set(row.category, (categories.get(row.category) ?? 0) + row.active_seconds);
-        for (const row of pack.projects) projects.set(row.project_name, (projects.get(row.project_name) ?? 0) + row.active_seconds);
+        for (const row of pack.projects) {
+          const key = packs.length > 1 ? `${data[i].employee.name} · ${row.project_name}` : row.project_name;
+          projects.set(key, (projects.get(key) ?? 0) + row.active_seconds);
+        }
       }
       const report = buildActivityReport({
         organization: profile.organizationName,
@@ -250,7 +254,7 @@ export default function Reports() {
           ...people.map((e) => ({ value: e.id, label: e.is_active ? e.name : `${e.name} (deactivated)` })),
         ]} />
       </Card>
-      {(pickedDay ? projectOptions.length > 1 : (projects.data?.length ?? 0) > 0) ? (
+      {projectOptions.length > 1 ? (
         <Card title="Select Project">
           <Segmented value={project} onChange={setProject} options={projectOptions} />
           <Text style={styles.hint}>

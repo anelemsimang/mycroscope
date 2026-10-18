@@ -21,6 +21,14 @@ test('no project is listed after all projects and before named projects', () => 
   ]);
 });
 
+test('the same project name for two people stays two separate choices', () => {
+  const choices = projectChoices([
+    { id: 'a', name: 'PRJ1', is_active: true, owner: 'Anele' },
+    { id: 'b', name: 'PRJ1', is_active: true, owner: 'Andril' },
+  ]);
+  assert.deepEqual(choices.map((p) => p.label), ['All projects', 'No project', 'PRJ1 · Anele', 'PRJ1 · Andril']);
+});
+
 test('a chosen day keeps only the projects that have time that day', () => {
   const choices = projectChoicesForDay(projects, [
     { project_id: projects[0].id },

@@ -29,8 +29,8 @@ export default function DayDetail() {
   const features = useAsync(() => api.features(), []);
   const software = features.data?.includes('software_usage') ?? false;
   const projectList = useAsync(
-    () => (project && project !== NO_PROJECT ? api.projects() : Promise.resolve([])),
-    [project]);
+    () => (project && project !== NO_PROJECT ? api.projects(id) : Promise.resolve([])),
+    [project, id]);
   const scope = projectScopePhrase(project, projectList.data);
 
   const { data, error, loading, refreshing, refresh } = useAsync(async () => {

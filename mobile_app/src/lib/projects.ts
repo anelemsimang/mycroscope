@@ -11,6 +11,8 @@ export interface NamedProject {
   id: string;
   name: string;
   is_active: boolean;
+  /** Set when the same name belongs to more than one person. */
+  owner?: string;
 }
 
 export function isProjectFilter(value: string | null | undefined): value is string {
@@ -26,10 +28,23 @@ export function projectQuery(project?: string | null): { p_project?: string; p_u
 
 /** All projects, then work with no project, then each named project. */
 export function projectChoices(projects: NamedProject[]): { value: string; label: string }[] {
+  const shared = new Set<string>();
+  const seen = new Set<string>();
+  for (const project of projects) {
+    const key = project.name.toLowerCase();
+    if (seen.has(key)) shared.add(key);
+    seen.add(key);
+  }
   return [
     { value: ALL_PROJECTS, label: 'All projects' },
     { value: NO_PROJECT, label: 'No project' },
-    ...projects.map((p) => ({ value: p.id, label: p.is_active ? p.name : `${p.name} (archived)` })),
+    ...projects.map((p) => {
+      const label = p.is_active ? p.name : `${p.name} (archived)`;
+      return {
+        value: p.id,
+        label: p.owner && shared.has(p.name.toLowerCase()) ? `${label} · ${p.owner}` : label,
+      };
+    }),
   ];
 }
 
