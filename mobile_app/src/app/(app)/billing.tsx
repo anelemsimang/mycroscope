@@ -4,7 +4,8 @@ import { StyleSheet, Text, View } from 'react-native';
 import { ServiceBanner } from '@/components/ServiceBanner';
 import { Button, Card, Empty, ErrorBanner, Field, Loading, Pill, Screen, colors, styles } from '@/components/ui';
 import { api, type Feature, type Invoice, type PlanCatalogueEntry, type PurchasedSeat, errorMessage } from '@/lib/api';
-import { confirmAction, shareText } from '@/lib/dialog';
+import { confirmAction } from '@/lib/dialog';
+import { sharePdfFile } from '@/lib/export';
 import { formatDate, formatDateTime, formatMoney } from '@/lib/format';
 import { useProfile, useSession } from '@/lib/session';
 import { useAsync } from '@/lib/useAsync';
@@ -97,27 +98,6 @@ function groupSeats(seats: PurchasedSeat[]) {
   return [...groups.values()];
 }
 
-function invoiceText(invoice: Invoice, timezone: string): string {
-  const lines = [
-    `Invoice ${invoice.number}`,
-    formatDate(invoice.issued_at, timezone),
-    '',
-    invoice.business_name,
-    invoice.business_address,
-    invoice.vat_enabled
-      ? `VAT number: ${invoice.business_vat_number || 'not set'}`
-      : '',
-    '',
-    `Bill to: ${invoice.organization_name}`,
-    invoice.description,
-    `${invoice.seats} seats`,
-    `Net ${formatMoney(invoice.net_cents)}`,
-  ];
-  if (invoice.vat_enabled) lines.push(`VAT ${formatMoney(invoice.vat_cents)}`);
-  lines.push(`Total ${formatMoney(invoice.gross_cents)}`);
-  return lines.filter((line) => line !== '').join('\n');
-}
-
 export default function Billing() {
   const profile = useProfile();
   const { reloadService } = useSession();
@@ -131,6 +111,25 @@ export default function Billing() {
     return { service, payments, catalogue, invoices, seats };
   }, [isOwner]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+
+  async function downloadReceipt(invoice: Invoice) {
+    setReceiptError(null);
+    setBusy(invoice.number);
+    try {
+      const { buildReceiptPdf } = await import('@/lib/receipt');
+      const bytes = await buildReceiptPdf({
+        ...invoice,
+        customer_name: invoice.customer_name || profile.name,
+        customer_email: invoice.customer_email || profile.email,
+      });
+      await sharePdfFile(`Mycroscope-${invoice.number}.pdf`, bytes, `Receipt ${invoice.number}`);
+    } catch (cause) {
+      setReceiptError(errorMessage(cause));
+    } finally {
+      setBusy(null);
+    }
+  }
   const [payError, setPayError] = useState<string | null>(null);
   const [addSeats, setAddSeats] = useState('1');
 
@@ -358,8 +357,9 @@ export default function Billing() {
       </Text>
       {!isOwner ? <Text style={styles.hint}>Only the manager who created the organisation can change the plan or pay.</Text> : null}
 
-      <Card title="Invoices">
-        {data.invoices.length === 0 ? <Empty text="No invoices yet." /> : data.invoices.map((invoice) => (
+      <Card title="Receipts">
+        {receiptError ? <ErrorBanner message={receiptError} /> : null}
+        {data.invoices.length === 0 ? <Empty text="No receipts yet. A receipt is ready here after a payment is confirmed." /> : data.invoices.map((invoice) => (
           <View key={invoice.number}>
             <Text style={styles.rowText}>
               {invoice.number} · {formatDate(invoice.issued_at, profile.timezone)} · {formatMoney(invoice.gross_cents)}
@@ -369,7 +369,7 @@ export default function Billing() {
               {invoice.vat_enabled ? `, VAT ${formatMoney(invoice.vat_cents)}` : ''}.
               {' '}{invoice.business_name}{invoice.vat_enabled ? `, VAT ${invoice.business_vat_number || 'number not set'}` : ''}.
             </Text>
-            <Button small variant="ghost" title="Share invoice" onPress={() => shareText(invoiceText(invoice, profile.timezone))} />
+            <Button small variant="ghost" title="Download receipt" loading={busy === invoice.number} onPress={() => downloadReceipt(invoice)} />
           </View>
         ))}
       </Card>

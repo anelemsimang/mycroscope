@@ -391,6 +391,9 @@ export interface Invoice {
   business_name: string;
   business_vat_number: string | null;
   business_address: string;
+  payment_reference?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
 }
 
 export interface OperatorOrg {

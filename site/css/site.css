@@ -162,6 +162,7 @@ footer a { color: #fff; text-decoration: none; }
 .banner { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 12px; padding: 0.8rem 1rem; }
 .banner.error { background: #fee2e2; border-color: #fecaca; }
 button.button { border: 0; cursor: pointer; font: inherit; }
+button.button[hidden], p[hidden] { display: none; }
 button.button:disabled { opacity: 0.65; cursor: default; }
 .pricing-page .plan-grid { margin-top: 3rem; }
 .pricing-page .table-wrap { margin-top: 3.5rem; }

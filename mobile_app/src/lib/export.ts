@@ -47,3 +47,23 @@ export async function sharePdf(filename: string, report: PdfReport): Promise<voi
   file.write(bytes);
   await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: report.title, UTI: 'com.adobe.pdf' });
 }
+
+/** Downloads a PDF that has already been drawn, such as a payment receipt. */
+export async function sharePdfFile(filename: string, bytes: Uint8Array, title: string): Promise<void> {
+  const name = safeName(filename.endsWith('.pdf') ? filename : `${filename}.pdf`);
+  if (Platform.OS === 'web') {
+    const copy = new Uint8Array(bytes);
+    const url = URL.createObjectURL(new Blob([copy], { type: 'application/pdf' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+  const file = new File(Paths.cache, name);
+  if (file.exists) file.delete();
+  file.create();
+  file.write(bytes);
+  await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: title, UTI: 'com.adobe.pdf' });
+}
