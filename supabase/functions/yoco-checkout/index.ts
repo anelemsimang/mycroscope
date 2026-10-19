@@ -9,6 +9,32 @@ import { CORS, env, json, jwtClaim } from '../_shared/http.ts';
 
 const NOT_SET_UP = 'Online payment is not set up yet.';
 const INTENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SITE = 'https://mycroscope.co.za';
+
+function cardReturn(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'https:') return parsed.toString();
+    const path = `${parsed.pathname}${parsed.search}`;
+    return `${SITE}${path.startsWith('/') ? path : `/${path}`}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function yocoFailure(status: number, body: unknown): string {
+  if (status === 401 || status === 403) {
+    return 'Yoco refused the secret key. Set the secret key from Yoco again. It starts with sk_test_ or sk_live_.';
+  }
+  const record = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  const raw = [record.message, record.reason, record.description, record.error]
+    .find((part) => typeof part === 'string' && part.trim());
+  if (typeof raw === 'string') {
+    return raw.replace(/sk_(?:test|live)_[A-Za-z0-9_-]+/g, 'the secret key').slice(0, 180);
+  }
+  return 'The payment could not be started.';
+}
 
 function withIntent(url: string | undefined, intentId: string): string | undefined {
   if (!url) return undefined;
@@ -101,30 +127,40 @@ Deno.serve(async (req) => {
     return json({ redirect_url: null, amount_cents: 0, kind: quote.kind ?? 'current', message: quote.message ?? 'No payment is due.' });
   }
   if (!secret) return json({ error: NOT_SET_UP }, 503);
+  if ((!secret.startsWith('sk_test_') && !secret.startsWith('sk_live_')) || /[\s"'<>]/.test(secret)) {
+    return json({ error: 'The Yoco secret key on the server is not a secret key. Set the key that starts with sk_test_ or sk_live_.' }, 503);
+  }
   if (!quote.intent_id) return json({ error: 'The payment could not be prepared.' }, 500);
+  const amount = Math.round(Number(quote.gross_cents));
+  if (!Number.isInteger(amount) || amount < 200) return json({ error: 'This amount cannot be charged on a card.' }, 400);
 
-  const successUrl = withIntent(safeReturnUrl(body.return_url, env('APP_URL')), quote.intent_id);
-  const cancelUrl = withIntent(safeReturnUrl(body.cancel_url, env('APP_URL')) ?? successUrl, quote.intent_id);
-  const failureUrl = withIntent(safeReturnUrl(body.failure_url, env('APP_URL')) ?? successUrl, quote.intent_id);
-  const checkout = await fetch('https://payments.yoco.com/api/checkouts', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      'Content-Type': 'application/json',
-      'Idempotency-Key': quote.intent_id,
-    },
-    body: JSON.stringify({
-      amount: quote.gross_cents,
-      currency: 'ZAR',
-      ...(successUrl ? { successUrl, cancelUrl, failureUrl } : {}),
-      externalId: quote.intent_id,
-      clientReferenceId: quote.intent_id,
-      metadata: { intentId: quote.intent_id, organizationId: employee.organization_id },
-    }),
-  });
+  const successUrl = cardReturn(withIntent(safeReturnUrl(body.return_url, env('APP_URL')), quote.intent_id));
+  const cancelUrl = cardReturn(withIntent(safeReturnUrl(body.cancel_url, env('APP_URL')) ?? successUrl, quote.intent_id));
+  const failureUrl = cardReturn(withIntent(safeReturnUrl(body.failure_url, env('APP_URL')) ?? successUrl, quote.intent_id));
+  let checkout: Response;
+  try {
+    checkout = await fetch('https://payments.yoco.com/api/checkouts', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        'Content-Type': 'application/json',
+        'Idempotency-Key': quote.intent_id,
+      },
+      body: JSON.stringify({
+        amount,
+        currency: 'ZAR',
+        ...(successUrl ? { successUrl, cancelUrl, failureUrl } : {}),
+        externalId: quote.intent_id,
+        metadata: { intentId: String(quote.intent_id), organizationId: String(employee.organization_id) },
+      }),
+    });
+  } catch {
+    return json({ error: 'Yoco could not be reached. Try again in a moment.' }, 502);
+  }
   const created = await checkout.json().catch(() => null);
   if (!checkout.ok || typeof created?.redirectUrl !== 'string' || typeof created?.id !== 'string') {
-    return json({ error: 'The payment could not be started.' }, 502);
+    console.error(`yoco checkout failed: ${checkout.status}`);
+    return json({ error: yocoFailure(checkout.status, created) }, 502);
   }
   const { error: attachError } = await admin.rpc('attach_yoco_checkout', {
     p_intent: quote.intent_id, p_checkout_id: created.id,
