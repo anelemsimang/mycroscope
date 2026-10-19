@@ -411,6 +411,29 @@ export interface OperatorOrg {
   support_access_until: string | null;
   /** Set only for the control panel. The customer app never receives this. */
   granted?: boolean;
+  pending_plan?: string | null;
+  prepaid_plan?: string | null;
+  cancel_at_period_end?: boolean;
+  grant_until?: string | null;
+  next_seat_end?: string | null;
+  require_mfa?: boolean;
+  open_requests?: number;
+}
+
+export interface AccountHistoryEntry {
+  occurred_at: string;
+  kind: string;
+  title: string;
+  detail: string;
+}
+
+export interface OperatorDesk {
+  collected_cents: number;
+  due_cents: number;
+  renewals: { organization_id: string; name: string; seats: number; ends_on: string; covered: boolean }[];
+  requests: { id: string; organization_id: string; name: string; kind: string; status: string; created_at: string; message: string }[];
+  checkouts: { organization_id: string; name: string; plan_key: string; kind: string; gross_cents: number; seats: number; created_at: string }[];
+  agents: { organization_id: string; name: string; detail: string }[];
 }
 
 export interface SystemHealth {
@@ -1032,6 +1055,8 @@ export const api = {
 export const operatorApi = {
   isOperator: () => rpc<boolean>('am_i_platform_admin'),
   organizations: () => rpc<OperatorOrg[]>('op_organizations'),
+  accountHistory: (org: string) => rpc<AccountHistoryEntry[]>('op_account_history', { p_org: org }),
+  desk: () => rpc<OperatorDesk>('op_operator_desk'),
   seats: (org: string) => rpc<PurchasedSeat[]>('op_subscription_seats', { p_org: org }),
   health: async () => (await rpc<SystemHealth[]>('op_system_health'))[0],
   audit: (limit = 200) => rpc<OperatorAuditEntry[]>('op_operator_audit', { p_limit: limit }),

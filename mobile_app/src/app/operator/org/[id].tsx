@@ -5,10 +5,10 @@ import { Text, View } from 'react-native';
 import {
   Button, Card, Empty, ErrorBanner, Field, InfoGrid, Loading, Pill, Screen, Segmented, colors, styles,
 } from '@/components/ui';
-import { api, errorMessage, operatorApi, type OperatorOrg, type PlanCatalogueEntry, type PurchasedSeat } from '@/lib/api';
+import { api, errorMessage, operatorApi, type AccountHistoryEntry, type OperatorOrg, type PlanCatalogueEntry, type PurchasedSeat } from '@/lib/api';
 import { confirmAction, notify } from '@/lib/dialog';
 import { formatDate, formatDateTime, formatRelative } from '@/lib/format';
-import { planName, statusLine, statusName, supportOpen } from '@/lib/operator';
+import { planChangeSummary, planName, statusLine, statusName, supportOpen } from '@/lib/operator';
 import { useAsync } from '@/lib/useAsync';
 
 const ZONE = 'Africa/Johannesburg';
@@ -20,13 +20,14 @@ const STATUS_LABEL: Record<(typeof STATUSES)[number], string> = {
 export default function OperatorOrgScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, error, loading, refreshing, refresh, reload } = useAsync(async () => {
-    const [orgs, plans, seats] = await Promise.all([
+    const [orgs, plans, seats, history] = await Promise.all([
       operatorApi.organizations(), api.planCatalogue(), operatorApi.seats(id).catch(() => [] as PurchasedSeat[]),
+      operatorApi.accountHistory(id).catch(() => [] as AccountHistoryEntry[]),
     ]);
     const org = orgs.find((o) => o.organization_id === id) ?? null;
     const open = !!org && supportOpen(org);
     const snapshot = open ? await operatorApi.supportSnapshot(id) : null;
-    return { org, snapshot, supportOpen: open, plans, seats };
+    return { org, snapshot, supportOpen: open, plans, seats, history };
   }, [id]);
   const reloadRef = useRef(reload);
   reloadRef.current = reload;
@@ -37,7 +38,8 @@ export default function OperatorOrgScreen() {
 
   if (loading && !data) return <Loading />;
   const org = data?.org;
-  const cap = data?.plans.find((p) => p.key === org?.plan)?.seat_cap ?? null;
+  const included = data?.plans.find((p) => p.key === org?.plan)?.seat_cap ?? 3;
+  const bought = !org || org.plan === 'free' || !org.plan ? 0 : Math.max(0, org.seats ?? 0);
   if (!org) {
     return (
       <Screen>
@@ -60,11 +62,13 @@ export default function OperatorOrgScreen() {
         <InfoGrid items={[
           { label: 'Manager', value: `${org.owner_name ?? '–'}${org.owner_email ? ` · ${org.owner_email}` : ''}` },
           { label: 'Signed up', value: formatDate(org.created_at) },
-          { label: 'People', value: org.granted
-            ? `${org.active_employees} · unlimited`
-            : org.plan === 'free'
-              ? `${org.active_employees} of ${cap ?? 3}`
-              : `${org.active_employees} of ${org.seats ?? 0} purchased seats` },
+          { label: 'Seats bought', value: org.plan === 'free' ? `0 · ${included} included` : String(bought) },
+          { label: 'Registered', value: String(org.active_employees) },
+          { label: 'Plan change', value: planChangeSummary(org, data?.plans ?? []) ?? 'None waiting' },
+          { label: 'Next seat ends', value: org.next_seat_end ? formatDate(org.next_seat_end, ZONE) : '–' },
+          { label: 'Cover without payment', value: org.grant_until ? `Until ${formatDate(org.grant_until, ZONE)}` : 'No' },
+          { label: 'Two-factor', value: org.require_mfa ? 'Required' : 'Optional' },
+          { label: 'Privacy requests', value: String(org.open_requests ?? 0) },
           { label: 'Installed agents', value: String(org.activated_employees) },
           { label: 'Seen in 2 min', value: String(org.agents_online) },
           { label: 'Last check-in', value: org.last_activity_at ? formatRelative(org.last_activity_at) : 'never' },
@@ -76,9 +80,10 @@ export default function OperatorOrgScreen() {
         </Text>
       </Card>
       <SeatCard seats={data?.seats ?? []} />
+      <HistoryCard rows={data?.history ?? []} />
       <SubscriptionEditor org={org} plans={data?.plans ?? []} onSaved={refresh} />
       <SupportCard org={org} snapshot={data?.snapshot ?? null} open={!!data?.supportOpen} />
-      {org.status === 'cancelled' ? <DeleteCard org={org} /> : null}
+      <DeleteCard org={org} />
     </Screen>
   );
 }
@@ -166,6 +171,22 @@ function SubscriptionEditor({ org, plans, onSaved }: { org: OperatorOrg; plans: 
       {org.granted ? (
         <Button title="Remove privilege" variant="secondary" onPress={removePrivilege} disabled={!note.trim()} loading={saving} />
       ) : null}
+    </Card>
+  );
+}
+
+function HistoryCard({ rows }: { rows: AccountHistoryEntry[] }) {
+  return (
+    <Card title="Payments and plan changes">
+      <Text style={styles.hint}>
+        Payments, paid upgrades, scheduled downgrades, and seats added from this control panel. Newest first.
+      </Text>
+      {rows.length === 0 ? <Empty text="No payments or plan changes yet." /> : rows.map((row, index) => (
+        <View key={`${row.occurred_at}-${index}`} style={{ paddingVertical: 8, gap: 2 }}>
+          <Text style={styles.rowText}>{row.title}</Text>
+          <Text style={styles.hint}>{formatDateTime(row.occurred_at, ZONE)}{row.detail ? ` · ${row.detail}` : ''}</Text>
+        </View>
+      ))}
     </Card>
   );
 }
@@ -260,14 +281,14 @@ function DeleteCard({ org }: { org: OperatorOrg }) {
   }
 
   return (
-    <Card title="Delete customer data">
+    <Card title="Delete organisation">
       <Text style={styles.hint}>
-        Use this when a cancelled customer asks for erasure or their retention period has passed. Type the organisation
-        name exactly to confirm.
+        This removes the organisation and everything that belongs to it: people, activity, billing, and sign-in accounts.
+        Type the organisation name exactly. This cannot be undone.
       </Text>
       <Field label="Organisation name" value={name} onChangeText={setName} placeholder={org.name} autoCapitalize="none" />
       {err ? <ErrorBanner message={err} /> : null}
-      <Button title="Delete all data" variant="danger" onPress={remove} disabled={name !== org.name} loading={busy} />
+      <Button title="Delete organisation" variant="danger" onPress={remove} disabled={name !== org.name} loading={busy} />
     </Card>
   );
 }

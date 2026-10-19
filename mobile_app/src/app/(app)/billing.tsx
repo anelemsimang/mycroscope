@@ -151,43 +151,15 @@ export default function Billing() {
     openWebsiteCheckout(target.key, seats, when);
   }
 
-  async function scheduleUpgrade(target: PlanCatalogueEntry) {
-    setPayError(null);
-    setBusy(target.key);
-    try {
-      const quote = await api.quotePlan(target.key, undefined, 'schedule');
-      const ok = await confirmAction(
-        'Start when this term ends',
-        quote.message ?? 'Nothing is charged today. The new plan starts only if its year is paid.',
-        'Schedule the upgrade',
-      );
-      if (!ok) return;
-      await api.commitPlanChange(target.key, 'schedule');
-      await refresh();
-    } catch (e) {
-      setPayError(errorMessage(e));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function addPrivilegedSeats() {
-    setPayError(null);
+  function payForSeats() {
     const count = Number(addSeats);
     if (!Number.isInteger(count) || count < 1 || count > 10000) {
       setPayError('Choose how many seats to add.');
       return;
     }
-    setBusy('add-seats');
-    try {
-      await api.addGrantedSeats(count);
-      setAddSeats('1');
-      await refresh();
-    } catch (e) {
-      setPayError(errorMessage(e));
-    } finally {
-      setBusy(null);
-    }
+    setPayError(null);
+    if (!plan) return;
+    openWebsiteCheckout(plan.key, count);
   }
 
   async function scheduleRemoval(seat: PurchasedSeat) {
@@ -289,9 +261,7 @@ export default function Billing() {
       {isOwner && plan && plan.net_price_cents > 0 ? (
         <Card title="Purchased seats">
           <Text style={styles.hint}>
-            {unlimited
-              ? 'Seats added here run until the end of the current plan year. Removing a seat waits until that seat\'s end date.'
-              : 'Each seat runs for its own year from the day it was paid. Adding a seat charges that year, with VAT. Removing a seat waits until that seat\'s end date. Nothing is refunded.'}
+            Each seat runs for its own year from the day it was paid. Adding a seat opens the payment page and charges that year, with VAT. Removing a seat waits until that seat's end date. Nothing is refunded.
           </Text>
           {seatGroups.length === 0 ? <Empty text="No seats are in their paid year." /> : seatGroups.map((group) => (
             <View key={group.period_end} style={{ gap: 6, paddingVertical: 8 }}>
@@ -310,10 +280,8 @@ export default function Billing() {
             </View>
           ))}
           <Field label="Seats to add" value={addSeats} onChangeText={setAddSeats} keyboardType="number-pad"
-            hint={unlimited ? 'These seats run until the end of the current plan year.' : 'Each new seat is billed for one year, with VAT.'} />
-          {unlimited
-            ? <Button title="Add seats" onPress={addPrivilegedSeats} loading={busy === 'add-seats'} />
-            : <Button title="Buy seats on the website" onPress={() => reviewPurchase(plan)} />}
+            hint="Each new seat is billed for one year, with VAT. Payment opens on the next page." />
+          <Button title="Continue to payment" onPress={payForSeats} />
         </Card>
       ) : null}
 
@@ -362,16 +330,7 @@ export default function Billing() {
                 ) : (
                   <View style={{ gap: 8 }}>
                     <Button title="Start today" onPress={() => reviewPurchase(item, 'now')} />
-                    {scheduled ? (
-                      <Button title="Pay the new year" variant="secondary" onPress={() => reviewPurchase(item, 'end')} />
-                    ) : (
-                      <Button
-                        title="Start when this term ends"
-                        variant="secondary"
-                        onPress={() => scheduleUpgrade(item)}
-                        loading={busy === item.key}
-                      />
-                    )}
+                    <Button title="Pay and start when this term ends" variant="secondary" onPress={() => reviewPurchase(item, 'end')} />
                   </View>
                 )
               ) : isOwner && !current && higher ? (
@@ -395,7 +354,7 @@ export default function Billing() {
       <Text style={styles.hint}>
         You choose how many seats to buy. The card form is on Yoco's page. A seat is the monthly price times 12, with VAT, for one year from the day it is paid.
         A seat added later has its own year. Removing a seat waits until that seat's end date, and nothing is refunded.
-        Moving up from a paid plan can start today or at the end of this term. Starting today charges one year of the new plan for the seats already purchased, minus the unused part of the current plan on each seat, and every seat then ends one year from today. Waiting charges nothing today. The new plan starts only after a year of that plan is paid. If it is not paid, the change does not start. A downgrade starts when the last seat's year ends, and extra people are paused rather than removed.
+        Moving up from a paid plan can start today or at the end of this term. Both choices open the payment page. Starting today charges one year of the new plan for the seats already purchased, minus the unused part of the current plan on each paid seat, and every seat then ends one year from today. Starting at the end of this term charges one year of the new plan, and that plan starts on that date after the payment is confirmed. If it is not paid, the change does not start. A downgrade starts when the last seat's year ends, and extra people are paused rather than removed.
       </Text>
       {!isOwner ? <Text style={styles.hint}>Only the manager who created the organisation can change the plan or pay.</Text> : null}
 

@@ -7,12 +7,22 @@ import { ServiceBanner } from '@/components/ServiceBanner';
 import {
   ActionButton, Button, Card, Empty, ErrorBanner, Loading, Pill, Screen, StatGrid, colors, stateColor, stateLabel, styles,
 } from '@/components/ui';
-import { api, planHasInsights, type TeamRow } from '@/lib/api';
+import { api, planHasInsights, type ServiceStatus, type TeamRow } from '@/lib/api';
+import { seatOccupancy } from '@/lib/operator';
 import { confirmAction } from '@/lib/dialog';
 import { formatDuration, formatRelative, formatTime, todayIn } from '@/lib/format';
 import { useProfile, useSession } from '@/lib/session';
 import { supabase } from '@/lib/supabase';
 import { useAsync } from '@/lib/useAsync';
+
+function seatStats(service: ServiceStatus | null): { label: string; value: string }[] {
+  if (!service) return [];
+  const { registered, vacant } = seatOccupancy(service.seats_used, service.seat_cap ?? Math.max(0, service.seats));
+  return [
+    { label: 'Registered seats', value: String(registered) },
+    { label: 'Vacant seats', value: String(vacant) },
+  ];
+}
 
 const roleLabel = { owner: 'MANAGER', manager: 'MANAGER', employee: 'EMPLOYEE' } as const;
 const roleColor = { owner: colors.danger, manager: colors.warning, employee: colors.primary } as const;
@@ -97,6 +107,7 @@ export default function Dashboard() {
           </Pressable>
         ) : null}
         <StatGrid items={[
+          ...seatStats(service),
           ...(liveAllowed ? [{ label: 'Online now', value: `${online}/${team.length}` }] : []),
           { label: 'Team active today', value: formatDuration(totalActive), color: colors.success },
           { label: 'Team idle today', value: formatDuration(totalIdle), color: colors.warning },
