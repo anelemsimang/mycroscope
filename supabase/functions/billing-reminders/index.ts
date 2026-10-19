@@ -40,9 +40,9 @@ Deno.serve(async (req) => {
   let emailed = 0;
   for (const row of rows) {
     let payUrl = appUrl ? `${appUrl}/checkout` : '';
-    const successUrl = appUrl ? `${appUrl}/checkout-received` : '';
-    const cancelUrl = appUrl ? `${appUrl}/checkout-cancelled` : '';
-    const failureUrl = appUrl ? `${appUrl}/checkout-failed` : '';
+    const successUrl = appUrl ? `${appUrl}/checkout-received?intent=${row.intent_id}` : '';
+    const cancelUrl = appUrl ? `${appUrl}/checkout-cancelled?intent=${row.intent_id}` : '';
+    const failureUrl = appUrl ? `${appUrl}/checkout-failed?intent=${row.intent_id}` : '';
     if (yocoKey && !row.yoco_checkout_id) {
       const checkout = await fetch('https://payments.yoco.com/api/checkouts', {
         method: 'POST',
@@ -55,6 +55,8 @@ Deno.serve(async (req) => {
           amount: row.gross_cents,
           currency: 'ZAR',
           ...(successUrl ? { successUrl, cancelUrl, failureUrl } : {}),
+          externalId: row.intent_id,
+          clientReferenceId: row.intent_id,
           metadata: { intentId: row.intent_id, organizationId: row.organization_id },
         }),
       });

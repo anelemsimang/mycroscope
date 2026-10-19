@@ -35,11 +35,12 @@ Deno.serve(async (req) => {
   if (event.type !== 'payment.succeeded') return json({ ignored: true });
 
   const payment = event.payload;
-  const intentId = payment?.metadata?.intentId;
   const reference = payment?.id;
-  if (typeof intentId !== 'string' || typeof reference !== 'string' || typeof payment?.amount !== 'number') {
+  if (typeof reference !== 'string' || typeof payment?.amount !== 'number') {
     return json({ error: 'The payment is missing its checkout details' }, 400);
   }
+  const metadata = payment.metadata ?? {};
+  let intentId = typeof metadata.intentId === 'string' ? metadata.intentId : '';
   const liveKey = env('YOCO_SECRET_KEY') ?? '';
   if (liveKey.startsWith('sk_live_') && payment.mode === 'test') {
     return json({ error: 'A test payment cannot be applied to the live account' }, 400);
@@ -48,6 +49,12 @@ Deno.serve(async (req) => {
   const admin = createClient(env('SUPABASE_URL')!, env('SUPABASE_SERVICE_ROLE_KEY')!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  if (!intentId && typeof metadata.checkoutId === 'string') {
+    const { data: intent } = await admin.from('checkout_intents')
+      .select('id').eq('yoco_checkout_id', metadata.checkoutId).maybeSingle();
+    if (intent?.id) intentId = intent.id;
+  }
+  if (!intentId) return json({ error: 'The payment is missing its checkout details' }, 400);
   const { data, error } = await admin.rpc('apply_checkout_payment', {
     p_intent: intentId,
     p_reference: reference,

@@ -1,12 +1,21 @@
-// Starts a Yoco checkout for the signed-in organisation owner.
-// The amount comes from quote_plan_change, which reads the plan catalogue. Secrets: YOCO_SECRET_KEY.
-// Optional: APP_URL. The browser return URL is not proof of payment. The webhook is.
+// Starts a Yoco checkout for the signed-in organisation owner, and confirms it with the secret key.
+// Yoco's Checkout screen has a public key and a secret key. The public key is not used here:
+// the card form is on Yoco's page. The secret key creates the checkout and reads it back.
+// A return to this site is not proof of payment. A completed checkout with a payment id is.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 import { safeReturnUrl } from '../_shared/billing.ts';
 import { CORS, env, json, jwtClaim } from '../_shared/http.ts';
 
 const NOT_SET_UP = 'Online payment is not set up yet.';
+const INTENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function withIntent(url: string | undefined, intentId: string): string | undefined {
+  if (!url) return undefined;
+  const next = new URL(url);
+  next.searchParams.set('intent', intentId);
+  return next.toString();
+}
 
 interface Quote {
   kind?: string;
@@ -34,13 +43,12 @@ Deno.serve(async (req) => {
   const { data: me, error: meError } = await user.auth.getUser();
   if (meError || !me.user?.email) return json({ error: 'Please sign in again.' }, 401);
 
-  let body: { plan?: unknown; seats?: unknown; when?: unknown; return_url?: unknown; cancel_url?: unknown; failure_url?: unknown };
+  let body: { plan?: unknown; seats?: unknown; when?: unknown; return_url?: unknown; cancel_url?: unknown; failure_url?: unknown; confirm?: unknown; intent?: unknown };
   try {
     body = await req.json();
   } catch {
     return json({ error: 'Choose a plan.' }, 400);
   }
-  if (typeof body.plan !== 'string' || !body.plan) return json({ error: 'Choose a plan.' }, 400);
 
   const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: employee } = await admin.from('employees')
@@ -51,6 +59,36 @@ Deno.serve(async (req) => {
   if (settings?.require_mfa && jwtClaim(token, 'aal') !== 'aal2') {
     return json({ error: 'Your organisation requires two-factor login. Sign in with your code first.' }, 403);
   }
+
+  if (body.confirm === true) {
+    if (!secret) return json({ error: NOT_SET_UP }, 503);
+    if (typeof body.intent !== 'string' || !INTENT.test(body.intent)) return json({ error: 'This payment could not be found.' }, 400);
+    const { data: intent } = await admin.from('checkout_intents')
+      .select('id, status, gross_cents, yoco_checkout_id')
+      .eq('id', body.intent).eq('organization_id', employee.organization_id).maybeSingle();
+    if (!intent) return json({ error: 'This payment could not be found.' }, 404);
+    if (intent.status === 'paid') return json({ confirmed: true });
+    if (!intent.yoco_checkout_id) return json({ confirmed: false, pending: true });
+    const lookup = await fetch(`https://payments.yoco.com/api/checkouts/${intent.yoco_checkout_id}`, {
+      headers: { Authorization: `Bearer ${secret}` },
+    });
+    const checkout = await lookup.json().catch(() => null);
+    if (secret.startsWith('sk_live_') && checkout?.processingMode === 'test') {
+      return json({ error: 'A test payment cannot be applied to the live account.' }, 400);
+    }
+    const paid = lookup.ok && checkout?.status === 'completed' && typeof checkout.paymentId === 'string' && checkout.paymentId;
+    if (!paid) return json({ confirmed: false, pending: checkout?.status === 'created' || checkout?.status === 'started' || checkout?.status === 'processing' });
+    const { error: applyError } = await admin.rpc('apply_checkout_payment', {
+      p_intent: intent.id,
+      p_reference: checkout.paymentId,
+      p_amount: checkout.amount,
+      p_currency: checkout.currency ?? 'ZAR',
+      p_raw: checkout,
+    });
+    if (applyError) return json({ error: applyError.message }, 409);
+    return json({ confirmed: true });
+  }
+  if (typeof body.plan !== 'string' || !body.plan) return json({ error: 'Choose a plan.' }, 400);
 
   const seats = typeof body.seats === 'number' && Number.isInteger(body.seats) ? body.seats : null;
   const when = body.when === 'end' ? 'end' : 'now';
@@ -65,9 +103,9 @@ Deno.serve(async (req) => {
   if (!secret) return json({ error: NOT_SET_UP }, 503);
   if (!quote.intent_id) return json({ error: 'The payment could not be prepared.' }, 500);
 
-  const successUrl = safeReturnUrl(body.return_url, env('APP_URL'));
-  const cancelUrl = safeReturnUrl(body.cancel_url, env('APP_URL')) ?? successUrl;
-  const failureUrl = safeReturnUrl(body.failure_url, env('APP_URL')) ?? successUrl;
+  const successUrl = withIntent(safeReturnUrl(body.return_url, env('APP_URL')), quote.intent_id);
+  const cancelUrl = withIntent(safeReturnUrl(body.cancel_url, env('APP_URL')) ?? successUrl, quote.intent_id);
+  const failureUrl = withIntent(safeReturnUrl(body.failure_url, env('APP_URL')) ?? successUrl, quote.intent_id);
   const checkout = await fetch('https://payments.yoco.com/api/checkouts', {
     method: 'POST',
     headers: {
@@ -79,6 +117,8 @@ Deno.serve(async (req) => {
       amount: quote.gross_cents,
       currency: 'ZAR',
       ...(successUrl ? { successUrl, cancelUrl, failureUrl } : {}),
+      externalId: quote.intent_id,
+      clientReferenceId: quote.intent_id,
       metadata: { intentId: quote.intent_id, organizationId: employee.organization_id },
     }),
   });

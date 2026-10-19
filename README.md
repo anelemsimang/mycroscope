@@ -120,19 +120,22 @@ the account moves to Free. Recording continues. Extra people are paused, not del
 plan is hidden, and it is deleted only once it is older than the longest plan or older than the shorter limit
 the owner already chose.
 
-1. Create a Yoco account. Use the test secret key until one payment has been confirmed by the webhook.
+1. In the Yoco app, open the Checkout API integration and tap How to connect. Copy the secret key.
+   The public key stays in Yoco. The card form is on Yoco's page, so Mycroscope does not use it.
+   There is no separate webhook key on that screen.
 2. From the repository root, with the Supabase CLI logged in and the project linked:
 
    ```powershell
    supabase functions deploy yoco-checkout
    supabase functions deploy yoco-webhook billing-reminders --no-verify-jwt
-   supabase secrets set YOCO_SECRET_KEY=sk_test_... YOCO_WEBHOOK_SECRET=whsec_...
+   supabase secrets set YOCO_SECRET_KEY=sk_test_...
    ```
 
+   Use the test secret key (`sk_test_...`) until one payment has been confirmed, then switch to the live secret key.
    `APP_URL` and `CRON_SECRET` are already set. The morning payment email also needs `BREVO_API_KEY`
    (section 7). The account still moves to Free after the grace window if email is not configured.
-3. In Yoco, subscribe to `payment.succeeded` at
-   `https://YOUR_PROJECT_REF.supabase.co/functions/v1/yoco-webhook`.
+3. When the payer returns, Mycroscope reads the checkout back from Yoco with that same secret key.
+   The plan changes only if Yoco reports the checkout as completed. A webhook is optional.
 4. Before the first tax invoice, set the supplier VAT number. The business name is already stored.
 
    ```sql

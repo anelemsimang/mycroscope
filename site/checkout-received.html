@@ -20,12 +20,14 @@
     <div class="wrap order">
       <p class="kicker">Payment</p>
       <h1>Payment sent.</h1>
-      <p>You have been sent back to Mycroscope. This page does not mean the payment is confirmed. The plan updates after the payment succeeds. That usually takes a minute.</p>
+      <p id="payment-status">Checking this payment with Yoco.</p>
       <p><a class="button" href="/billing">Check billing</a></p>
       <p><a id="again" href="/pricing">Back to pricing</a></p>
     </div>
   </main>
   <footer><div class="wrap legal"><a href="/">Home</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></div></footer>
+  <script src="js/billing-config.js"></script>
+  <script type="module" src="js/checkout-received.js"></script>
   <script>
     const plan = new URLSearchParams(location.search).get('plan');
     if (plan && /^(work_activity|workforce|productivity)$/.test(plan)) {
